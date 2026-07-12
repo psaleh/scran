@@ -18,6 +18,8 @@ from fastapi.staticfiles import StaticFiles
 from . import config, db
 from .auth.passwords import hash_password
 from .auth.routes import router as auth_router
+from .ingredients import router as ingredients_router
+from .recipes import router as recipes_router
 
 log = logging.getLogger("scran")
 logging.basicConfig(level=logging.INFO)
@@ -57,6 +59,8 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="Scran", lifespan=lifespan)
 
 app.include_router(auth_router)
+app.include_router(recipes_router)
+app.include_router(ingredients_router)
 
 
 @app.get("/api/health")

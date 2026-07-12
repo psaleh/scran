@@ -1,0 +1,305 @@
+import { useEffect, useState } from 'react'
+import { useNavigate, useParams } from 'react-router-dom'
+import { Avatar } from '@astryxdesign/core/Avatar'
+import { Badge } from '@astryxdesign/core/Badge'
+import { Button } from '@astryxdesign/core/Button'
+import { Card } from '@astryxdesign/core/Card'
+import { Divider } from '@astryxdesign/core/Divider'
+import { EmptyState } from '@astryxdesign/core/EmptyState'
+import { IconButton } from '@astryxdesign/core/IconButton'
+import { NumberInput } from '@astryxdesign/core/NumberInput'
+import { Spinner } from '@astryxdesign/core/Spinner'
+import { TextArea } from '@astryxdesign/core/TextArea'
+import { ToggleButton } from '@astryxdesign/core/ToggleButton'
+
+import { api } from '../api.js'
+import TagBadge from '../components/TagBadge.jsx'
+import { sectionLabelStyle, stepNumberStyle } from '../styles.js'
+import { useIsDesktop } from '../useIsDesktop.js'
+
+// Display-only scaling (spec §3.1): stored amounts are never changed.
+function formatAmount(n) {
+  if (n == null) return null
+  return String(Math.round(n * 100) / 100)
+}
+
+function IngredientRow({ ingredient, scale }) {
+  const amount =
+    ingredient.scalable && ingredient.amount != null
+      ? ingredient.amount * scale
+      : ingredient.amount
+  const meta = [formatAmount(amount), ingredient.unit].filter(Boolean).join(' ')
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--spacing-3)', padding: 'var(--spacing-3) var(--spacing-4)' }}>
+      <div style={{ fontSize: 'var(--font-size-xl)', color: 'var(--color-text-secondary)', minWidth: 64, flexShrink: 0 }}>
+        {meta || '—'}
+      </div>
+      <div style={{ flex: 1, minWidth: 0, fontSize: 'var(--font-size-xl)', color: 'var(--color-text-primary)' }}>
+        {ingredient.name}
+      </div>
+    </div>
+  )
+}
+
+function NoteRow({ note, currentUser, onChanged }) {
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState(note.text)
+  const canModify = note.user_id === currentUser.id || currentUser.is_admin
+
+  const save = async () => {
+    await api(`/api/notes/${note.id}`, { method: 'PUT', body: { text: draft } })
+    setEditing(false)
+    onChanged()
+  }
+  const remove = async () => {
+    await api(`/api/notes/${note.id}`, { method: 'DELETE' })
+    onChanged()
+  }
+
+  if (editing) {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-2)', padding: 'var(--spacing-3) 0' }}>
+        <TextArea label="Edit note" isLabelHidden value={draft} onChange={setDraft} rows={2} />
+        <div style={{ display: 'flex', gap: 'var(--spacing-2)' }}>
+          <Button label="Save" variant="primary" size="sm" clickAction={save} />
+          <Button label="Cancel" variant="ghost" size="sm" onClick={() => { setDraft(note.text); setEditing(false) }} />
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div style={{ display: 'flex', gap: 'var(--spacing-3)', padding: 'var(--spacing-3) 0' }}>
+      <Avatar name={note.author} size="small" />
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 'var(--spacing-2)' }}>
+          <span style={{ fontSize: 'var(--font-size-base)', fontWeight: 'var(--font-weight-semibold)', color: 'var(--color-text-primary)' }}>
+            {note.author}
+          </span>
+          <span style={{ fontSize: 'var(--text-supporting-size)', color: 'var(--color-text-secondary)' }}>
+            {new Date(note.created_at + 'Z').toLocaleString()}
+          </span>
+        </div>
+        <div style={{ fontSize: 'var(--font-size-lg)', lineHeight: 1.5, color: 'var(--color-text-primary)', marginTop: 2 }}>
+          {note.text}
+        </div>
+      </div>
+      {canModify && (
+        <div style={{ display: 'flex', gap: 2, flexShrink: 0 }}>
+          <IconButton label="Edit note" icon={<span>✎</span>} variant="ghost" size="sm" onClick={() => setEditing(true)} />
+          <IconButton label="Delete note" icon={<span>×</span>} variant="ghost" size="sm" clickAction={remove} />
+        </div>
+      )}
+    </div>
+  )
+}
+
+function NotesSection({ recipe, currentUser, onChanged }) {
+  const [draft, setDraft] = useState('')
+
+  const save = async () => {
+    if (!draft.trim()) return
+    await api(`/api/recipes/${recipe.id}/notes`, { method: 'POST', body: { text: draft.trim() } })
+    setDraft('')
+    onChanged()
+  }
+
+  return (
+    <div>
+      <span style={sectionLabelStyle}>Notes</span>
+
+      {/* Inline add box — no navigation, no edit mode (spec §3.1.1). */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-2)', marginTop: 'var(--spacing-3)', marginBottom: 'var(--spacing-2)' }}>
+        <TextArea label="Add a note" isLabelHidden value={draft} onChange={setDraft} rows={2} placeholder="Add a note about this recipe…" />
+        <div>
+          <Button label="Save note" variant="secondary" size="sm" clickAction={save} isDisabled={!draft.trim()} />
+        </div>
+      </div>
+
+      <Card padding={0} style={{ padding: '0 var(--spacing-3)' }}>
+        {recipe.notes.length === 0 && (
+          <div style={{ padding: 'var(--spacing-3) 0', fontSize: 'var(--font-size-base)', color: 'var(--color-text-secondary)' }}>
+            No notes yet.
+          </div>
+        )}
+        {recipe.notes.map((n, i) => (
+          <div key={n.id}>
+            {i > 0 && <Divider />}
+            <NoteRow note={n} currentUser={currentUser} onChanged={onChanged} />
+          </div>
+        ))}
+      </Card>
+    </div>
+  )
+}
+
+/** Recipe detail: photo, tags, servings stepper with live scaling, steps,
+ * cooking notes (spec §6.3). */
+export default function RecipeDetailPage({ currentUser }) {
+  const { id } = useParams()
+  const navigate = useNavigate()
+  const isDesktop = useIsDesktop()
+  const [recipe, setRecipe] = useState(null)
+  const [error, setError] = useState('')
+  const [servings, setServings] = useState(null)
+
+  const load = () => {
+    api(`/api/recipes/${id}`)
+      .then((r) => {
+        setRecipe(r)
+        setServings((s) => s ?? r.servings ?? 1)
+      })
+      .catch((err) => setError(err.message))
+  }
+  useEffect(() => {
+    // Reset the stepper when switching recipe (or version), then load.
+    setServings(null)
+    setRecipe(null)
+    load()
+  }, [id])
+
+  if (error) return <EmptyState title="Recipe not found" description={error} actions={<Button label="Back to recipes" onClick={() => navigate('/')} />} />
+  if (recipe === null) {
+    return (
+      <div style={{ display: 'flex', justifyContent: 'center', padding: 'var(--spacing-8)' }}>
+        <Spinner label="Loading recipe" />
+      </div>
+    )
+  }
+
+  const baseServings = recipe.servings || 1
+  const scale = (servings || baseServings) / baseServings
+
+  const leftColumn = (
+    <>
+      {/* Photo header with back/edit floating buttons */}
+      <div style={{ position: 'relative', flexShrink: 0 }}>
+        <div
+          style={{
+            height: isDesktop ? 260 : 220,
+            width: '100%',
+            borderRadius: isDesktop ? 'var(--radius-container)' : 0,
+            overflow: 'hidden',
+            background: 'var(--color-background-muted)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
+        >
+          {recipe.photo_path ? (
+            <img src={`/api/uploads/${recipe.photo_path}`} alt={recipe.title} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+          ) : (
+            <span style={{ fontFamily: 'var(--font-family-code)', fontSize: 'var(--font-size-sm)', color: 'var(--color-text-secondary)' }}>
+              no photo yet
+            </span>
+          )}
+        </div>
+        <div style={{ position: 'absolute', top: 'var(--spacing-3)', left: 'var(--spacing-3)', right: 'var(--spacing-3)', display: 'flex', justifyContent: 'space-between' }}>
+          {!isDesktop ? <IconButton label="Back" icon={<span>‹</span>} variant="secondary" onClick={() => navigate('/')} /> : <span />}
+          <Button label="Edit" icon={<span>✎</span>} variant="secondary" size="sm" onClick={() => navigate(`/recipes/${recipe.id}/edit`)} />
+        </div>
+      </div>
+
+      <div style={{ padding: isDesktop ? 'var(--spacing-4) 0' : 'var(--spacing-4)', display: 'flex', flexDirection: 'column', gap: 'var(--spacing-3)' }}>
+        <h1 style={{ margin: 0, fontSize: 'var(--text-heading-1-size)', fontWeight: 'var(--text-heading-1-weight)', color: 'var(--color-text-primary)' }}>
+          {recipe.title}
+        </h1>
+
+        <div style={{ display: 'flex', gap: 'var(--spacing-2)', flexWrap: 'wrap', alignItems: 'center' }}>
+          {recipe.status === 'draft' && <Badge label="Draft" variant="warning" />}
+          {recipe.tags.map((t) => <TagBadge key={t} tag={t} />)}
+        </div>
+
+        {/* Version switcher (only when this recipe has more than one version) */}
+        {recipe.versions.length > 1 && (
+          <div style={{ display: 'flex', gap: 'var(--spacing-2)', flexWrap: 'wrap', alignItems: 'center' }}>
+            <span style={{ fontSize: 'var(--text-supporting-size)', color: 'var(--color-text-secondary)' }}>
+              Versions:
+            </span>
+            {recipe.versions.map((v, i) => (
+              <ToggleButton
+                key={v.id}
+                label={v.version_label || (i === 0 ? 'Original' : `Version ${i + 1}`)}
+                size="sm"
+                isPressed={v.id === recipe.id}
+                onPressedChange={() => {
+                  if (v.id !== recipe.id) navigate(`/recipes/${v.id}`)
+                }}
+              />
+            ))}
+          </div>
+        )}
+
+        {recipe.description && (
+          <p style={{ margin: 0, fontSize: 'var(--font-size-lg)', lineHeight: 1.5, color: 'var(--color-text-primary)' }}>
+            {recipe.description}
+          </p>
+        )}
+
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <span style={{ fontSize: 'var(--font-size-xl)', fontWeight: 'var(--font-weight-medium)', color: 'var(--color-text-primary)' }}>
+            Servings
+          </span>
+          <NumberInput label="Servings" isLabelHidden value={servings} onChange={setServings} min={1} max={24} />
+        </div>
+      </div>
+
+      <div style={{ padding: isDesktop ? '0 0 var(--spacing-2)' : '0 var(--spacing-4)', marginBottom: 'var(--spacing-2)' }}>
+        <span style={sectionLabelStyle}>Ingredients</span>
+      </div>
+
+      <Card padding={0} style={{ margin: isDesktop ? 0 : '0 var(--spacing-4)' }}>
+        {recipe.ingredients.map((ing, i) => (
+          <div key={ing.id}>
+            {i > 0 && <Divider />}
+            <IngredientRow ingredient={ing} scale={scale} />
+          </div>
+        ))}
+        {recipe.ingredients.length === 0 && (
+          <div style={{ padding: 'var(--spacing-3) var(--spacing-4)', color: 'var(--color-text-secondary)' }}>
+            No ingredients listed.
+          </div>
+        )}
+      </Card>
+    </>
+  )
+
+  const rightColumn = (
+    <div style={{ padding: isDesktop ? 0 : 'var(--spacing-4)', display: 'flex', flexDirection: 'column', gap: 'var(--spacing-1)' }}>
+      <span style={{ ...sectionLabelStyle, marginBottom: 'var(--spacing-2)' }}>Steps</span>
+      {recipe.steps.map((step, i) => (
+        <div key={i} style={{ display: 'flex', gap: 'var(--spacing-3)', padding: 'var(--spacing-3) 0' }}>
+          <div style={stepNumberStyle}>{i + 1}</div>
+          <div style={{ fontSize: 'var(--font-size-lg)', lineHeight: 1.5, color: 'var(--color-text-primary)', paddingTop: 3 }}>
+            {step}
+          </div>
+        </div>
+      ))}
+      {recipe.steps.length === 0 && (
+        <span style={{ color: 'var(--color-text-secondary)' }}>No steps yet.</span>
+      )}
+
+      <div style={{ marginTop: 'var(--spacing-6)' }}>
+        <NotesSection recipe={recipe} currentUser={currentUser} onChanged={load} />
+      </div>
+    </div>
+  )
+
+  if (isDesktop) {
+    return (
+      <div style={{ flex: 1, overflowY: 'auto', padding: 'var(--spacing-6)' }}>
+        <div style={{ maxWidth: 1200, margin: '0 auto', display: 'grid', gridTemplateColumns: '420px 1fr', gap: 'var(--spacing-8)', alignItems: 'start' }}>
+          <div style={{ position: 'sticky', top: 0, display: 'flex', flexDirection: 'column' }}>{leftColumn}</div>
+          <div style={{ maxWidth: 640 }}>{rightColumn}</div>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden' }}>
+      {leftColumn}
+      {rightColumn}
+    </div>
+  )
+}

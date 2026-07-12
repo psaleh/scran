@@ -1,18 +1,36 @@
 import { useEffect, useState } from 'react'
+import { BrowserRouter, Route, Routes } from 'react-router-dom'
 import { Center } from '@astryxdesign/core/Center'
 import { Spinner } from '@astryxdesign/core/Spinner'
-import { VStack } from '@astryxdesign/core/Layout'
-import { Heading, Text } from '@astryxdesign/core/Text'
-import { Button } from '@astryxdesign/core/Button'
 
 import { api } from './api.js'
+import AppNav from './components/AppNav.jsx'
 import LoginPage from './pages/LoginPage.jsx'
+import BrowsePage from './pages/BrowsePage.jsx'
+import RecipeDetailPage from './pages/RecipeDetailPage.jsx'
+import RecipeEditorPage from './pages/RecipeEditorPage.jsx'
+import { useIsDesktop } from './useIsDesktop.js'
 
-/**
- * App root: figures out whether someone is logged in, then shows either the
- * login page or the app. Real routing arrives with the recipe screens; for
- * now the "app" is a placeholder proving the session works.
- */
+/** Signed-in app shell: desktop gets a top nav, mobile a bottom tab bar. */
+function Shell({ user }) {
+  const isDesktop = useIsDesktop()
+  return (
+    <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', minHeight: 0, background: 'var(--color-background-body)' }}>
+      {isDesktop && <AppNav />}
+      <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+        <Routes>
+          <Route path="/" element={<BrowsePage />} />
+          <Route path="/recipes/new" element={<RecipeEditorPage />} />
+          <Route path="/recipes/:id" element={<RecipeDetailPage currentUser={user} />} />
+          <Route path="/recipes/:id/edit" element={<RecipeEditorPage />} />
+        </Routes>
+      </div>
+      {!isDesktop && <AppNav />}
+    </div>
+  )
+}
+
+/** App root: checks the session, then shows login or the app. */
 export default function App() {
   // undefined = still checking, null = logged out, object = logged in
   const [user, setUser] = useState(undefined)
@@ -35,21 +53,9 @@ export default function App() {
     return <LoginPage onLogin={setUser} />
   }
 
-  const handleLogout = async () => {
-    await api('/api/auth/logout', { method: 'POST' })
-    setUser(null)
-  }
-
   return (
-    <Center axis="both" style={{ minHeight: '100vh' }}>
-      <VStack gap={4} hAlign="center">
-        <Heading level={1}>Scran</Heading>
-        <Text color="secondary">
-          Logged in as {user.username}
-          {user.is_admin ? ' (admin)' : ''} — recipes coming soon.
-        </Text>
-        <Button label="Log out" clickAction={handleLogout} />
-      </VStack>
-    </Center>
+    <BrowserRouter>
+      <Shell user={user} />
+    </BrowserRouter>
   )
 }

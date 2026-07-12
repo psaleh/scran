@@ -25,3 +25,21 @@ export async function api(path, { method = 'GET', body } = {}) {
   }
   return res.json()
 }
+
+/** Upload a single file as multipart form data (e.g. recipe photos). */
+export async function upload(path, fieldName, file) {
+  const form = new FormData()
+  form.append(fieldName, file)
+  const res = await fetch(path, { method: 'POST', body: form })
+  if (!res.ok) {
+    let message = `Upload failed (${res.status})`
+    try {
+      const data = await res.json()
+      if (data.detail) message = data.detail
+    } catch {
+      // keep generic message
+    }
+    throw new Error(message)
+  }
+  return res.json()
+}
