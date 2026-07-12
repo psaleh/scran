@@ -1,0 +1,10 @@
+{
+  "name": "Scran",
+  "short_name": "Scran",
+  "description": "Household recipe manager and shopping list",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#fafafa",
+  "theme_color": "#fafafa",
+  "icons": []
+}

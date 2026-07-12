@@ -1,0 +1,15 @@
+# Python
+__pycache__/
+.venv/
+
+# Node
+node_modules/
+frontend/dist/
+
+# Runtime data (mounted volumes in Docker, local dirs in dev)
+backend/data/
+data/
+uploads/
+
+# Secrets
+.env

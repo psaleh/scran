@@ -1,0 +1,5 @@
+# Kept deliberately small — see spec §4.2 "keep dependency count low".
+fastapi==0.115.*
+uvicorn[standard]==0.34.*
+bcrypt==4.*
+python-multipart==0.0.*

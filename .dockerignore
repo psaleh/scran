@@ -1,0 +1,11 @@
+**/node_modules
+**/.venv
+**/dist
+**/data
+**/uploads
+**/__pycache__
+.git
+.claude
+.mcp.json
+*.md
+!frontend/**/*.md
