@@ -16,13 +16,16 @@ never appears (spec §7): everything here is fire-and-forget from the UI's
 point of view.
 """
 
+import base64
 import json
 import logging
+import mimetypes
 import threading
 import time
 from datetime import datetime, timezone
+from pathlib import Path
 
-from . import ai, db
+from . import ai, config, db
 
 log = logging.getLogger("scran.worker")
 
@@ -189,10 +192,16 @@ def _run_job(conn, profile, job):
         )
         return
 
+    # A handler that created/updated a recipe reports its id in the result;
+    # record the link (jobs.recipe_id, migration 007) so the inbox can track
+    # the draft through to publication. COALESCE keeps a link set at enqueue
+    # time (redraft of an existing recipe).
+    linked_recipe = result.get("recipe_id") if isinstance(result, dict) else None
     conn.execute(
         "UPDATE jobs SET status = 'done', result = ?, error = NULL,"
-        " attempts = ?, updated_at = datetime('now') WHERE id = ?",
-        (json.dumps(result), job["attempts"] + 1, job["id"]),
+        " attempts = ?, recipe_id = COALESCE(recipe_id, ?),"
+        " updated_at = datetime('now') WHERE id = ?",
+        (json.dumps(result), job["attempts"] + 1, linked_recipe, job["id"]),
     )
     conn.commit()
     log.info("Job %d (%s) done", job["id"], job["type"])
@@ -322,6 +331,9 @@ Reply with ONLY a JSON object in exactly this shape:
 Rules for ingredients: "name" must contain ONLY the bare purchasable item —
 what you'd write on a shopping list. Preparation ("finely diced"), size
 ("small", "large"), and qualifiers ("optional", "divided") go in "note".
+If a line offers an alternative ("25g peeled galangal or ginger, chopped"),
+never drop it: the primary item goes in "name" and the alternative is kept
+in "note" (e.g. note "peeled, chopped; or ginger").
 Keep amounts as plain numbers (no fractions like "1/2" — use 0.5). If the
 recipe groups ingredients under headings (e.g. "For the sauce", "For the
 topping"), put that heading in "section" for every ingredient in that group
@@ -329,7 +341,7 @@ and null for ingredients with no heading — never invent headings that
 aren't in the source.
 
 Rules for tags: keep every tag already on the recipe unless it's flatly
-wrong for the dish. You may add tags the page text clearly supports. Before
+wrong for the dish. You may add tags the source clearly supports. Before
 adding or renaming a tag, check it against EXISTING TAGS IN USE below — if
 an equivalent already exists (e.g. "Asian Food" when "Asian" exists,
 "pudding" when "dessert" exists), reuse the existing tag instead of adding a
@@ -347,6 +359,17 @@ Extract the recipe, correcting any mistakes in the draft against the page.
 --- PAGE TEXT ---
 {page_text}
 {draft_section}"""
+
+
+def _existing_tags(conn):
+    """Every tag currently in use, for the dedup rule in RECIPE_JSON_SPEC
+    (issue #3: reuse "Asian" instead of inventing "Asian Food")."""
+    return [
+        r["tag"] for r in conn.execute(
+            "SELECT DISTINCT json_each.value AS tag FROM recipes, json_each(recipes.tags)"
+            " ORDER BY tag COLLATE NOCASE"
+        )
+    ]
 
 
 def _coerce_recipe(data):
@@ -453,12 +476,7 @@ def _url_redraft_job(conn, profile, payload):
     if not page_text.strip():
         raise ValueError("no stored page text to work from")
 
-    existing_tags = [
-        r["tag"] for r in conn.execute(
-            "SELECT DISTINCT json_each.value AS tag FROM recipes, json_each(recipes.tags)"
-            " ORDER BY tag COLLATE NOCASE"
-        )
-    ]
+    existing_tags = _existing_tags(conn)
 
     prompt = REDRAFT_PROMPT.format(
         draft_clause=(
@@ -472,7 +490,7 @@ def _url_redraft_job(conn, profile, payload):
             if draft else ""
         ),
     )
-    reply = ai.chat(profile, [{"role": "user", "content": prompt}])
+    reply = ai.chat(profile, [{"role": "user", "content": prompt}], temperature=0)
     recipe = _coerce_recipe(_extract_json(reply))
     result = {
         "recipe": recipe,
@@ -488,6 +506,155 @@ def _url_redraft_job(conn, profile, payload):
         result["page_text"] = page_text
         result["image_urls"] = payload.get("image_urls") or []
     return result
+
+
+# Stage 1 of the photo import: pure transcription, one photo per call.
+# Deliberately minimal — this exact wording was owner-tested against
+# qwen3-vl in LM Studio chat and produced word-for-word output, where a
+# combined "transcribe AND emit structured JSON" prompt made small vision
+# models hallucinate the dish from memory instead of reading the page.
+TRANSCRIBE_PROMPT = """\
+The attached image is a photo of a page from a cookbook or magazine.
+Transcribe only what is visibly printed on the page — do not infer or
+complete missing information. Keep the original wording, amounts, and
+order exactly as printed."""
+
+# Stage 2: text-only restructuring of the stage-1 transcription. No images
+# in this call, so the model can't "re-read" (i.e. re-imagine) the page.
+STRUCTURE_PROMPT = """\
+Below is a word-for-word transcription of one recipe photographed from a
+cookbook or magazine (multiple photos are pages of the same recipe, in
+order, separated by "--- PAGE N ---").
+
+This is a FORMATTING task, not a cooking task: convert the transcription
+into structured JSON, copying the ingredient list and the method steps
+exactly as transcribed — same ingredients, same amounts, same order, same
+wording of the instructions. Do not add, substitute, or omit ingredients
+or steps; do not "improve" the recipe. If a detail is missing from the
+transcription, leave that field null — never fill gaps with a typical
+version of the dish.
+
+"ingredients" must come ONLY from the transcription's ingredient list —
+the short lines, usually with amounts, sometimes grouped under headings
+like "For the sauce:". Emit exactly one JSON ingredient per ingredient
+line, in the order the lines are printed — none skipped, none merged, none
+reordered. NEVER create an ingredient from a method/instruction sentence:
+a quantity that appears only inside an instruction ("cut into 2.5cm-wide
+strips", "add 1 teaspoon salt") belongs in that step's text, not in
+"ingredients". If an ingredient used in the method has no line in the
+ingredient list, the transcription is simply missing it — leave it out
+rather than reconstructing it.
+
+{spec}
+
+--- EXISTING TAGS IN USE ---
+{existing_tags}
+
+--- TRANSCRIPTION ---
+{transcription}"""
+
+
+@handles("photo_import")
+def _photo_import_job(conn, profile, payload):
+    """AI photo import (spec §5.3): send the uploaded photos to the vision
+    model, parse its structured JSON defensively, and create a *draft*
+    recipe — never published; a human reviews it against the original photos
+    in the editor (via the inbox's "Review draft"). Ingredient names run
+    through the normal categorisation flow (§3.6)."""
+    # Deferred import: ingredients.py imports this module for wake().
+    from .ingredients import enqueue_categorise_job, resolve_category
+
+    photo_paths = payload.get("photos") or []
+    if not photo_paths:
+        raise ValueError("photo import job has no photos")
+
+    # Two-stage pipeline: small vision models transcribe accurately but
+    # hallucinate when asked to transcribe AND emit structured JSON in one
+    # shot. Stage 1 sends each photo alone with a bare transcription prompt
+    # (one page per call also keeps the vision-token count well inside the
+    # endpoint's context window); stage 2 structures the combined text.
+    # Images ride along inline as data URLs (OpenAI-compatible vision form) —
+    # LM Studio and OpenRouter both accept this; no URL needs to be public.
+    pages = []
+    for number, rel in enumerate(photo_paths, start=1):
+        path = Path(config.UPLOADS_PATH) / rel
+        mime = mimetypes.guess_type(path.name)[0] or "image/jpeg"
+        encoded = base64.b64encode(path.read_bytes()).decode("ascii")
+        content = [
+            {"type": "text", "text": TRANSCRIBE_PROMPT},
+            {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{encoded}"}},
+        ]
+        # temperature=0: transcription must copy the page, not riff on it.
+        reply = ai.chat(profile, [{"role": "user", "content": content}], temperature=0)
+        pages.append(f"--- PAGE {number} ---\n{reply.strip()}")
+    transcription = "\n\n".join(pages)
+
+    reply = ai.chat(
+        profile,
+        [{"role": "user", "content": STRUCTURE_PROMPT.format(
+            spec=RECIPE_JSON_SPEC,
+            existing_tags=", ".join(_existing_tags(conn)) or "(none yet)",
+            transcription=transcription,
+        )}],
+        temperature=0,
+    )
+    recipe = _coerce_recipe(_extract_json(reply))
+
+    # Create the draft recipe directly (spec §5.3) — the review screen edits
+    # this row, so re-running "Review draft" never duplicates anything.
+    cur = conn.execute(
+        "INSERT INTO recipes (title, description, servings, tags, status, created_by)"
+        " VALUES (?, ?, ?, ?, 'draft', ?)",
+        (recipe["title"], recipe["description"], recipe["servings"],
+         json.dumps(recipe["tags"]), payload.get("user_id")),
+    )
+    recipe_id = cur.lastrowid
+    conn.execute(
+        "UPDATE recipes SET version_group = ? WHERE id = ?", (recipe_id, recipe_id)
+    )
+    needs_ai = []
+    for pos, ing in enumerate(recipe["ingredients"]):
+        category_id, miss = resolve_category(conn, ing["name"], None)
+        if miss:
+            needs_ai.append(ing["name"])
+        conn.execute(
+            "INSERT INTO ingredients"
+            " (recipe_id, position, amount, unit, name, note, category_id, scalable, section)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?)",
+            (recipe_id, pos, ing["amount"], ing["unit"], ing["name"],
+             ing["note"], category_id, ing["section"]),
+        )
+    for pos, text in enumerate(recipe["steps"]):
+        conn.execute(
+            "INSERT INTO steps (recipe_id, position, text) VALUES (?, ?, ?)",
+            (recipe_id, pos, text),
+        )
+    enqueue_categorise_job(conn, needs_ai)
+
+    # Provenance note (issue #4), attributed to whoever queued the import.
+    if payload.get("user_id") is not None:
+        conn.execute(
+            "INSERT INTO recipe_notes (recipe_id, user_id, text) VALUES (?, ?, ?)",
+            (recipe_id, payload["user_id"],
+             f"Imported by AI from {len(photo_paths)} photo(s)"),
+        )
+    conn.commit()
+    log.info(
+        "Photo import job created draft recipe %d (%d ingredients, %d steps)",
+        recipe_id, len(recipe["ingredients"]), len(recipe["steps"]),
+    )
+    # photos ride along so the review screen can show the originals
+    # alongside the draft (spec §5.3); the stage-1 transcription is kept so
+    # a bad draft can be diagnosed (did the model misread the page, or
+    # mangle the restructuring?) without re-running the job.
+    return {
+        "recipe_id": recipe_id,
+        "title": recipe["title"],
+        "photos": photo_paths,
+        "transcription": transcription,
+        "ingredients": len(recipe["ingredients"]),
+        "steps": len(recipe["steps"]),
+    }
 
 
 @handles("test")

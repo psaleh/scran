@@ -65,16 +65,19 @@ def _headers(profile):
     return headers
 
 
-def chat(profile, messages, max_tokens=None, timeout=CHAT_TIMEOUT_SECONDS):
+def chat(profile, messages, max_tokens=None, timeout=CHAT_TIMEOUT_SECONDS, temperature=None):
     """Send a chat-completions request and return the assistant message text.
 
     `messages` is standard OpenAI format (role/content dicts; content may be
     the multimodal list form for vision requests). Raises AiError with a
-    human-readable message on any failure.
+    human-readable message on any failure. Pass temperature=0 for
+    transcription/extraction tasks where inventiveness is a bug.
     """
     payload = {"model": profile["model"], "messages": messages}
     if max_tokens is not None:
         payload["max_tokens"] = max_tokens
+    if temperature is not None:
+        payload["temperature"] = temperature
     body = json.dumps(payload).encode("utf-8")
 
     log.info(

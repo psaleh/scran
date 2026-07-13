@@ -27,9 +27,14 @@ export async function api(path, { method = 'GET', body } = {}) {
 }
 
 /** Upload a single file as multipart form data (e.g. recipe photos). */
-export async function upload(path, fieldName, file) {
+export function upload(path, fieldName, file) {
+  return uploadMany(path, fieldName, [file])
+}
+
+/** Upload several files under one repeated field name (photo import). */
+export async function uploadMany(path, fieldName, files) {
   const form = new FormData()
-  form.append(fieldName, file)
+  for (const file of files) form.append(fieldName, file)
   const res = await fetch(path, { method: 'POST', body: form })
   if (!res.ok) {
     let message = `Upload failed (${res.status})`

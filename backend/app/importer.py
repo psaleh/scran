@@ -17,14 +17,15 @@ import sqlite3
 import urllib.error
 import urllib.parse
 import urllib.request
+import uuid
 from html import unescape
 from html.parser import HTMLParser
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, UploadFile
 from pydantic import BaseModel, Field
 
-from . import worker
+from . import config, worker
 from .auth.deps import get_current_user
 from .db import get_db
 from .jobs import _job
@@ -588,6 +589,53 @@ def import_from_url_ai(
     cur = db.execute(
         "INSERT INTO jobs (type, payload) VALUES ('url_redraft', ?)",
         (json.dumps({"url": url, "page_text": text, "image_urls": _image_urls(None, html)}),),
+    )
+    db.commit()
+    worker.wake()
+    return _job(db.execute("SELECT * FROM jobs WHERE id = ?", (cur.lastrowid,)).fetchone())
+
+
+MAX_IMPORT_PHOTOS = 8
+ALLOWED_PHOTO_EXTS = {".jpg", ".jpeg", ".png", ".webp"}
+
+
+@router.post("/import/photos", status_code=201)
+def import_from_photos(
+    photos: list[UploadFile],
+    db: sqlite3.Connection = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    """AI photo import (spec §3.3.3, §5.3): store the uploaded cookbook-page
+    photos and queue one photo_import job for all of them (multi-page recipes
+    = multiple photos = one job). The worker sends them to the vision model
+    and creates a draft recipe; the inbox offers it for review."""
+    if not photos:
+        raise HTTPException(status_code=400, detail="Upload at least one photo")
+    if len(photos) > MAX_IMPORT_PHOTOS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Up to {MAX_IMPORT_PHOTOS} photos per recipe — split very long recipes into two imports",
+        )
+    for photo in photos:
+        if Path(photo.filename or "").suffix.lower() not in ALLOWED_PHOTO_EXTS:
+            raise HTTPException(status_code=400, detail="Use JPEG, PNG, or WebP images")
+
+    # Written before the job row exists, so filenames are just random —
+    # import photos live under their own uploads subdirectory and are kept
+    # after the job so the review screen can always show the originals.
+    paths = []
+    for photo in photos:
+        rel = f"import/{uuid.uuid4().hex}{Path(photo.filename).suffix.lower()}"
+        dest = Path(config.UPLOADS_PATH) / rel
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_bytes(photo.file.read())
+        paths.append(rel)
+
+    cur = db.execute(
+        "INSERT INTO jobs (type, payload) VALUES ('photo_import', ?)",
+        # user_id: the worker attributes the draft + provenance note to
+        # whoever queued the import.
+        (json.dumps({"photos": paths, "user_id": user["id"]}),),
     )
     db.commit()
     worker.wake()

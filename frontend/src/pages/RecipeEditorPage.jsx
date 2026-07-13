@@ -12,6 +12,7 @@ import { Spinner } from '@astryxdesign/core/Spinner'
 import { TextArea } from '@astryxdesign/core/TextArea'
 import { TextInput } from '@astryxdesign/core/TextInput'
 import { Banner } from '@astryxdesign/core/Banner'
+import { Collapsible } from '@astryxdesign/core/Collapsible'
 import { Dialog } from '@astryxdesign/core/Dialog'
 
 import { api, upload } from '../api.js'
@@ -151,9 +152,18 @@ export default function RecipeEditorPage() {
   const { id } = useParams() // undefined on /recipes/new
   const navigate = useNavigate()
   const isDesktop = useIsDesktop()
+  const routeState = useLocation().state
   // Website import (spec §3.3.2) lands here with the parsed recipe in router
   // state; the form starts pre-filled and the user reviews before saving.
-  const prefill = useLocation().state?.prefill
+  const prefill = routeState?.prefill
+  // Photo import review (spec §5.3): the inbox passes the original scanned
+  // photos so they can sit alongside the editable draft. The draft itself is
+  // already saved (the worker created it), so the form loads from the API
+  // as with any edit.
+  const reviewPhotos = routeState?.reviewPhotos ?? []
+  // Stage-1 transcription of those photos, for tracing draft mistakes back
+  // to a misread page vs. a bad restructuring.
+  const reviewTranscription = routeState?.reviewTranscription ?? ''
 
   const [loaded, setLoaded] = useState(id === undefined)
   const [error, setError] = useState('')
@@ -509,7 +519,70 @@ export default function RecipeEditorPage() {
       </Dialog>
 
       <div style={{ flex: 1, overflowY: 'auto' }}>
-        <div style={{ maxWidth: isDesktop ? 1200 : 'none', margin: '0 auto', padding: isDesktop ? 'var(--spacing-6)' : 0 }}>
+        <div
+          style={{
+            maxWidth: isDesktop ? (reviewPhotos.length > 0 ? 1440 : 1200) : 'none',
+            margin: '0 auto',
+            padding: isDesktop ? 'var(--spacing-6)' : 0,
+            // Photo review (spec §5.3): originals side-by-side with the form
+            // on desktop; on mobile the panel just stacks above the form.
+            display: isDesktop && reviewPhotos.length > 0 ? 'grid' : undefined,
+            gridTemplateColumns: '340px minmax(0, 1fr)',
+            gap: 'var(--spacing-6)',
+            alignItems: 'start',
+          }}
+        >
+          {reviewPhotos.length > 0 && (
+            <div
+              style={{
+                padding: isDesktop ? 0 : 'var(--spacing-4) var(--spacing-4) 0',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 'var(--spacing-3)',
+                // Keep the originals in view while scrolling the long form.
+                position: isDesktop ? 'sticky' : 'static',
+                top: 0,
+                maxHeight: isDesktop ? 'calc(100dvh - 140px)' : 'none',
+                overflowY: isDesktop ? 'auto' : 'visible',
+              }}
+            >
+              <Banner
+                status="warning"
+                title="Check the draft against your photos"
+                description="The AI can misread quantities, units, and steps — compare each against the original pages before publishing."
+              />
+              {reviewPhotos.map((p, i) => (
+                <img
+                  key={p}
+                  src={`/api/uploads/${p}`}
+                  alt={`Original photo ${i + 1}`}
+                  style={{ width: '100%', borderRadius: 'var(--radius-container)', border: '1px solid var(--color-border)' }}
+                />
+              ))}
+              {reviewTranscription && (
+                // What the AI read off the pages (stage 1) before structuring
+                // it into the draft — if the draft looks wrong, this shows
+                // whether the photo was misread or the restructuring mangled
+                // an accurate transcription. Collapsed: the photos are the
+                // primary reference.
+                <Collapsible trigger="AI transcription" defaultIsOpen={false}>
+                  <p
+                    style={{
+                      margin: 0,
+                      padding: 'var(--spacing-2) 0',
+                      whiteSpace: 'pre-wrap',
+                      fontSize: 'var(--font-size-sm)',
+                      color: 'var(--color-text-secondary)',
+                    }}
+                  >
+                    {reviewTranscription}
+                  </p>
+                </Collapsible>
+              )}
+            </div>
+          )}
+
+          <div style={{ minWidth: 0 }}>
           <div style={{ padding: isDesktop ? '0 0 var(--spacing-4)' : 'var(--spacing-4)', display: 'flex', flexDirection: 'column', gap: 'var(--spacing-4)' }}>
             {error && <Banner status="error" title={error} />}
             {sourceUrl && (
@@ -710,6 +783,7 @@ export default function RecipeEditorPage() {
                 ))}
               </Card>
             </div>
+          </div>
           </div>
         </div>
       </div>

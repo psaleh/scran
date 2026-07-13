@@ -10,6 +10,7 @@ import { TextInput } from '@astryxdesign/core/TextInput'
 import { ToggleButton } from '@astryxdesign/core/ToggleButton'
 
 import { api } from '../api.js'
+import ImportPhotosDialog from '../components/ImportPhotosDialog.jsx'
 import ImportUrlDialog from '../components/ImportUrlDialog.jsx'
 import TagBadge from '../components/TagBadge.jsx'
 import { useIsDesktop } from '../useIsDesktop.js'
@@ -84,6 +85,7 @@ export default function BrowsePage() {
   const [recipes, setRecipes] = useState(null) // null = loading
   const [error, setError] = useState('')
   const [importOpen, setImportOpen] = useState(false)
+  const [photosOpen, setPhotosOpen] = useState(false)
   const isDesktop = useIsDesktop()
   const navigate = useNavigate()
 
@@ -104,11 +106,12 @@ export default function BrowsePage() {
     return () => clearTimeout(timer)
   }, [query, activeTag])
 
-  // "Add recipe" menu (spec §6.2): manual entry or website import. Photo
-  // import joins this menu once the AI import inbox is built.
+  // "Add recipe" menu (spec §6.2): manual entry, website import, or AI
+  // photo import.
   const addMenuItems = [
     { label: 'Manual entry', onClick: () => navigate('/recipes/new') },
     { label: 'Import from website…', onClick: () => setImportOpen(true) },
+    { label: 'Import from photo…', onClick: () => setPhotosOpen(true) },
   ]
 
   const isFreshInstall =
@@ -168,6 +171,7 @@ export default function BrowsePage() {
       </div>
 
       <ImportUrlDialog isOpen={importOpen} onOpenChange={setImportOpen} />
+      <ImportPhotosDialog isOpen={photosOpen} onOpenChange={setPhotosOpen} />
 
       {/* Grid */}
       <div style={{ flex: 1, overflowY: 'auto', padding: isDesktop ? 'var(--spacing-6)' : 'var(--spacing-4)' }}>

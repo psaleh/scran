@@ -20,8 +20,12 @@ import inbox screen (`frontend/src/pages/InboxPage.jsx`), the categorise job
 handler, manual recategorisation UI (shopping-list row dialog + editor
 per-row selector), and url_redraft (AI-extraction fallback, "Tidy up with
 AI" — available on the very first import review, before any manual save).
-**Remaining**: AI slice stages 4–5 (photo import + review screen, name/note
-cleanup job — spec §5 has the details), PWA service worker.
+Stage 4 (photo import + review screen) is built and verified end-to-end
+against a fake AI server, but **not yet owner-tested with real cookbook
+photos** — see "AI slice" below for its shape.
+**Remaining**: AI slice stage 5 (name/note cleanup job + removing the
+temporary test-job button/endpoint — spec §5 has the details), PWA service
+worker.
 
 ## Post-launch fixes (GitHub issues, 2026-07-13)
 
@@ -59,7 +63,8 @@ follow-on mechanics future agents should know about:
   ("Reviewed and tidied up by AI" / "Imported from `<url>`") via
   `_add_system_note` in `recipes.py`. `RecipeDetailPage.jsx` linkifies bare
   URLs inside note text so the import-source note is clickable.
-  Photo-scan provenance notes are deferred to stage 4 (not built yet).
+  Photo-scan imports get their provenance note ("Imported by AI from N
+  photo(s)") from the worker at draft-creation time, not via `ai_reviewed`.
 - **Job ↔ recipe linking** (issue: inbox should show "Done" not
   "needs review" forever): nullable `jobs.recipe_id` (migration 007), set at
   enqueue time for a redraft-of-an-existing-recipe, or via
@@ -77,10 +82,42 @@ follow-on mechanics future agents should know about:
 ## AI slice — state after stage 3.5 (read before building stage 4)
 
 - **Build stages one at a time and STOP after each** so the owner can test:
-  stages 3 (categorise) and 3.5 (url_redraft) are done and owner-tested,
-  next is 4 (photo import + review screen), then 5 (cleanup job + remove
-  the temporary "Enqueue test job" button in `InboxPage.jsx` and
-  `POST /api/jobs/test` in `jobs.py`).
+  stages 3 (categorise) and 3.5 (url_redraft) are done and owner-tested;
+  stage 4 (photo import) is built, awaiting owner testing with real
+  cookbook photos. Next is 5 (cleanup job + remove the temporary "Enqueue
+  test job" button in `InboxPage.jsx` and `POST /api/jobs/test` in
+  `jobs.py`).
+- Stage 4 shape: `POST /api/import/photos` (`importer.py`) stores 1–8
+  uploaded photos under `uploads/import/` and queues ONE `photo_import` job
+  (payload `{photos, user_id}`). `_photo_import_job` in `worker.py` runs a
+  **two-stage pipeline** (small vision models hallucinate when asked to
+  transcribe AND emit structured JSON in one call — first owner test with
+  qwen3-vl-8b produced invented/missing ingredients): stage 1 sends each
+  photo alone as a base64 data URL (OpenAI vision content-list form) with
+  the bare `TRANSCRIBE_PROMPT` (owner-tested wording — don't embellish);
+  stage 2 is a text-only `STRUCTURE_PROMPT` call that converts the combined
+  transcription to recipe JSON via `_extract_json` + `_coerce_recipe`, with
+  explicit rules: ingredients only from ingredient-list lines in printed
+  order (never invented from method sentences — quantities inside an
+  instruction stay in the step), and "X or Y" alternatives preserved in
+  `note` (rule lives in `RECIPE_JSON_SPEC`, so url_redraft gets it too).
+  The transcription is kept in the job result and shown collapsed
+  (`Collapsible`) in the editor's review column, so a bad draft can be
+  traced to a misread photo vs. a mangled restructuring. Photos upload at
+  ORIGINAL resolution deliberately — a 1600px client-side downscale was
+  tried and made small-print ingredient columns illegible to the model,
+  which silently dropped them (per-photo stage-1 calls keep context
+  pressure low without it). Unlike url_redraft, the job creates the draft
+  recipe itself
+  (ingredients via `resolve_category` +
+  `enqueue_categorise_job`, provenance note "Imported by AI from N
+  photo(s)", always `draft`). `_run_job` copies `result["recipe_id"]` into
+  `jobs.recipe_id` on success, so re-clicking "Review draft" reopens the
+  same recipe. Review = the normal editor with router state
+  `{reviewPhotos: [paths]}` from `InboxPage.jsx`: originals in a sticky
+  left column on desktop / stacked above the form on mobile, plus a
+  check-quantities warning Banner. Import photos are never deleted and are
+  not the recipe's cover photo (user uploads one in the editor if wanted).
 - Stage 3.5 shape: `_url_redraft_job` in `worker.py` handles both redraft
   (payload `{recipe_id, url}`; page text + current saved draft — including
   `tags` and per-ingredient `section` — read from DB at run time) and
@@ -129,9 +166,11 @@ follow-on mechanics future agents should know about:
   AI call). `enqueue_categorise_job()` now calls `worker.wake()`.
 - Testing gotcha: `pkill -f <pattern>` from the Bash tool matches its own
   wrapper shell and kills it (exit 144) — use a bracket pattern like
-  `pkill -f "fake_a[i].py"`. A fake OpenAI-compatible server for tests is
-  at scratchpad `fake_ai.py` (port 8021; port 8020 is taken by an unknown
-  long-lived process).
+  `pkill -f "fake_a[i].py"`. For tests, run a fake OpenAI-compatible server
+  on port 8021 (port 8020 is taken by an unknown long-lived process): serve
+  GET /models and POST /chat/completions, returning fenced recipe JSON when
+  the request contains `image_url` parts (past sessions' `fake_ai.py`
+  lived in the job scratchpad and is gone — recreate it).
 
 ## Owner context
 

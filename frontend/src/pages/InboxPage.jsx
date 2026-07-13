@@ -72,6 +72,11 @@ function JobCard({ job, onRetry, onReview }) {
             {Object.entries(job.result.categories).map(([name, cat]) => `${name} → ${cat}`).join(', ')}
           </div>
         )}
+        {job.status === 'done' && job.type === 'photo_import' && job.result?.title && (
+          <div style={{ fontSize: 'var(--text-supporting-size)', color: 'var(--color-text-secondary)' }}>
+            Draft: “{job.result.title}” — {job.result.ingredients} ingredient(s), {job.result.steps} step(s)
+          </div>
+        )}
         {job.status === 'done' && job.type === 'test' && job.result?.reply && (
           <div style={{ fontSize: 'var(--text-supporting-size)', color: 'var(--color-text-secondary)' }}>
             Model replied: “{job.result.reply}”
@@ -83,7 +88,7 @@ function JobCard({ job, onRetry, onReview }) {
             <Button label="Retry" variant="secondary" size="sm" clickAction={() => onRetry(job.id)} />
           </div>
         )}
-        {job.type === 'url_redraft' && needsReview && job.result?.recipe && (
+        {needsReview && (job.type === 'photo_import' ? job.recipe_id != null : job.result?.recipe) && (
           <div style={{ display: 'flex', gap: 'var(--spacing-2)', marginTop: 'var(--spacing-1)' }}>
             <Button label="Review draft" variant="primary" size="sm" clickAction={() => onReview(job)} />
           </div>
@@ -133,6 +138,21 @@ export default function InboxPage() {
   // an existing recipe open that recipe with the AI's draft pre-filled (the
   // user still has to save); fallback extractions open a brand-new draft.
   const review = (job) => {
+    // Photo imports already saved their draft recipe (the worker created
+    // it); reviewing just opens that recipe in the editor with the original
+    // photos alongside for checking (spec §5.3).
+    if (job.type === 'photo_import') {
+      navigate(`/recipes/${job.recipe_id}/edit`, {
+        state: {
+          reviewPhotos: job.result?.photos ?? [],
+          // What the AI actually read off the pages — shown collapsed in the
+          // review column so a bad draft can be traced to a misread photo
+          // vs. a mangled restructuring.
+          reviewTranscription: job.result?.transcription ?? '',
+        },
+      })
+      return
+    }
     const { recipe, url, page_text: pageText, image_urls: imageUrls } = job.result
     // job.recipe_id is the durable link (set at enqueue time for a redraft
     // of an existing recipe, or once a fallback extraction gets saved for
