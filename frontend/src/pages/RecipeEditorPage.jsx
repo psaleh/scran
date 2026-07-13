@@ -162,6 +162,12 @@ export default function RecipeEditorPage() {
   const [servings, setServings] = useState(prefill?.servings ?? 4)
   const [tags, setTags] = useState(prefill?.tags ?? [])
   const [tagDraft, setTagDraft] = useState('')
+  // All tags already in use, for autocomplete — steers manual tagging
+  // towards existing tags instead of near-duplicates ("Asian" vs "Asian Food").
+  const [allTags, setAllTags] = useState([])
+  const [tagSuggestOpen, setTagSuggestOpen] = useState(false)
+  const [tagHighlight, setTagHighlight] = useState(-1)
+  const tagBlurTimer = useRef(null)
   const [sourceUrl, setSourceUrl] = useState(prefill?.source_url ?? null)
   const [status, setStatus] = useState('draft')
   const [ingredients, setIngredients] = useState(() =>
@@ -193,6 +199,7 @@ export default function RecipeEditorPage() {
 
   useEffect(() => {
     api('/api/categories').then(setCategories).catch(() => {})
+    api('/api/recipes/tags').then(setAllTags).catch(() => {})
   }, [])
 
   useEffect(() => {
@@ -238,6 +245,44 @@ export default function RecipeEditorPage() {
     const t = tagDraft.trim()
     if (t && !tags.includes(t)) setTags([...tags, t])
     setTagDraft('')
+    setTagSuggestOpen(false)
+    setTagHighlight(-1)
+  }
+
+  const pickTag = (t) => {
+    if (!tags.includes(t)) setTags([...tags, t])
+    setTagDraft('')
+    setTagSuggestOpen(false)
+    setTagHighlight(-1)
+  }
+
+  const tagSuggestions = tagDraft.trim()
+    ? allTags
+        .filter((t) => t.toLowerCase().includes(tagDraft.trim().toLowerCase()) && !tags.includes(t))
+        .slice(0, 8)
+    : []
+
+  // Enter picks the highlighted suggestion when the dropdown is open (falls
+  // through to adding tagDraft verbatim otherwise); arrows move the
+  // highlight; Escape closes without picking.
+  const onTagKeyDown = (e) => {
+    if (e.key === 'ArrowDown' && tagSuggestOpen && tagSuggestions.length > 0) {
+      e.preventDefault()
+      setTagHighlight((i) => (i + 1) % tagSuggestions.length)
+    } else if (e.key === 'ArrowUp' && tagSuggestOpen && tagSuggestions.length > 0) {
+      e.preventDefault()
+      setTagHighlight((i) => (i <= 0 ? tagSuggestions.length - 1 : i - 1))
+    } else if (e.key === 'Enter') {
+      e.preventDefault()
+      if (tagSuggestOpen && tagHighlight >= 0 && tagHighlight < tagSuggestions.length) {
+        pickTag(tagSuggestions[tagHighlight])
+      } else {
+        addTag()
+      }
+    } else if (e.key === 'Escape' && tagSuggestOpen) {
+      setTagSuggestOpen(false)
+      setTagHighlight(-1)
+    }
   }
 
   const choosePhoto = (e) => {
@@ -561,8 +606,45 @@ export default function RecipeEditorPage() {
                   ))}
                 </div>
               )}
-              <div style={{ maxWidth: isDesktop ? 360 : 'none' }} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addTag() } }}>
-                <TextInput label="Tags" value={tagDraft} onChange={setTagDraft} placeholder="Add a tag, press Enter" isOptional />
+              <div
+                style={{ maxWidth: isDesktop ? 360 : 'none', position: 'relative' }}
+                onKeyDown={onTagKeyDown}
+                onFocus={() => { clearTimeout(tagBlurTimer.current); setTagSuggestOpen(true) }}
+                onBlur={() => { tagBlurTimer.current = setTimeout(() => setTagSuggestOpen(false), 150) }}
+              >
+                <TextInput
+                  label="Tags"
+                  value={tagDraft}
+                  onChange={(v) => { setTagDraft(v); setTagSuggestOpen(true); setTagHighlight(-1) }}
+                  placeholder="Add a tag, press Enter"
+                  isOptional
+                />
+                {/* Autocomplete against tags already in the database, so a
+                    manual tag reuses "Asian" instead of adding "Asian Food".
+                    Arrow keys move the highlight; Enter picks it. */}
+                {tagSuggestOpen && tagSuggestions.length > 0 && (
+                  <Card style={{ position: 'absolute', left: 0, right: 0, top: '100%', marginTop: 4, padding: 4, zIndex: 10, boxShadow: 'var(--shadow-high)' }}>
+                    {tagSuggestions.map((t, i) => (
+                      <div
+                        key={t}
+                        onMouseDown={(e) => { e.preventDefault(); pickTag(t) }}
+                        onMouseEnter={() => setTagHighlight(i)}
+                        style={{
+                          padding: 'var(--spacing-2) var(--spacing-3)',
+                          borderRadius: 'var(--radius-inner)',
+                          fontSize: 'var(--text-body-size)',
+                          color: 'var(--color-text-primary)',
+                          cursor: 'pointer',
+                          backgroundImage: i === tagHighlight
+                            ? 'linear-gradient(var(--color-overlay-hover), var(--color-overlay-hover))'
+                            : 'none',
+                        }}
+                      >
+                        {t}
+                      </div>
+                    ))}
+                  </Card>
+                )}
               </div>
             </div>
           </div>
