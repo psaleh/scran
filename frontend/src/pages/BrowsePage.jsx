@@ -22,7 +22,10 @@ function RecipeCard({ recipe, onOpen }) {
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
       onClick={() => onOpen(recipe.id)}
-      style={{ cursor: 'pointer' }}
+      // minWidth: 0 stops a long title's intrinsic width from stretching this
+      // grid item past its column — without it, text-overflow: ellipsis on
+      // the title below has no narrower box to actually clip against.
+      style={{ cursor: 'pointer', minWidth: 0 }}
     >
       <Card padding={0} style={{ overflow: 'hidden', boxShadow: hover ? 'var(--shadow-med)' : undefined, transition: 'box-shadow 125ms cubic-bezier(0.24,1,0.4,1)' }}>
         <div

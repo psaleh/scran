@@ -14,6 +14,7 @@ import { TextInput } from '@astryxdesign/core/TextInput'
 import { Banner } from '@astryxdesign/core/Banner'
 import { Collapsible } from '@astryxdesign/core/Collapsible'
 import { Dialog } from '@astryxdesign/core/Dialog'
+import { DropdownMenu } from '@astryxdesign/core/DropdownMenu'
 
 import { api, upload } from '../api.js'
 import { sectionLabelStyle, stepNumberStyle } from '../styles.js'
@@ -463,11 +464,25 @@ export default function RecipeEditorPage() {
         }}
       >
         <IconButton label="Back" icon={<span>‹</span>} variant="ghost" onClick={() => navigate(-1)} />
-        <div style={{ display: 'flex', gap: 'var(--spacing-2)' }}>
-          {id !== undefined && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--spacing-2)' }}>
+          {/* Delete/Save-as-version are secondary actions — on mobile they'd
+              push "Save draft"/"Publish" off-screen, so they collapse into an
+              overflow menu there; desktop has room to show them inline. */}
+          {id !== undefined && !isDesktop && (
+            <DropdownMenu
+              button={{ label: 'More actions', icon: <span>⋮</span>, isIconOnly: true, variant: 'ghost', size: 'sm' }}
+              hasChevron={false}
+              items={[
+                { label: 'Save as version…', onClick: () => setVersionDialogOpen(true) },
+                { label: 'Delete…', onClick: () => setDeleteDialogOpen(true) },
+              ]}
+              menuWidth={180}
+            />
+          )}
+          {id !== undefined && isDesktop && (
             <Button label="Delete…" variant="destructive" size="sm" onClick={() => setDeleteDialogOpen(true)} />
           )}
-          {id !== undefined && (
+          {id !== undefined && isDesktop && (
             <Button label="Save as version…" variant="ghost" size="sm" onClick={() => setVersionDialogOpen(true)} />
           )}
           <Button label="Save draft" variant="secondary" size="sm" clickAction={() => save('draft')} />
