@@ -153,10 +153,6 @@ Tags may be a simple comma/JSON field in v1; a proper tags join table is accepta
 - Output: a revised draft presented for review, never auto-applied. The user's current draft (including any manual edits) is what gets sent, so corrections are preserved and built upon.
 - Triggered per-recipe from the draft editor ("Tidy up with AI") or from the failed-parse dialog; runs through the standard job queue.
 
-### 5.6 Name/note cleanup job (one-off, admin-triggered)
-- Purpose: repair ingredients created before the name/note split existed (e.g. names like "small onion (finely diced)").
-- Admin action in settings: "Clean up ingredient names". Enqueues a job batching all suspect ingredient names to the AI, requesting JSON pairs {clean_name, note} per ingredient.
-- Results are presented for review before applying (same review-first principle as photo import). On apply: update ingredient rows and rebuild affected `ingredient_lookup` entries, merging use_counts where names collapse into one.
 
 ## 6. Screens (for design phase)
 
