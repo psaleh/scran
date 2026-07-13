@@ -253,16 +253,20 @@ export default function RecipeDetailPage({ currentUser }) {
             </span>
           )}
         </div>
-        <div style={{ position: 'absolute', top: 'var(--spacing-3)', left: 'var(--spacing-3)', right: 'var(--spacing-3)', display: 'flex', justifyContent: 'space-between' }}>
-          {!isDesktop ? <IconButton label="Back" icon={<span>‹</span>} variant="secondary" onClick={() => navigate('/')} /> : <span />}
-          <Button label="Edit" icon={<span>✎</span>} variant="secondary" size="sm" onClick={() => navigate(`/recipes/${recipe.id}/edit`)} />
-        </div>
+        {!isDesktop && (
+          <div style={{ position: 'absolute', top: 'var(--spacing-3)', left: 'var(--spacing-3)' }}>
+            <IconButton label="Back" icon={<span>‹</span>} variant="secondary" onClick={() => navigate('/')} />
+          </div>
+        )}
       </div>
 
       <div style={{ padding: isDesktop ? 'var(--spacing-4) 0' : 'var(--spacing-4)', display: 'flex', flexDirection: 'column', gap: 'var(--spacing-3)' }}>
-        <h1 style={{ margin: 0, fontSize: 'var(--text-heading-1-size)', fontWeight: 'var(--text-heading-1-weight)', color: 'var(--color-text-primary)' }}>
-          {recipe.title}
-        </h1>
+        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 'var(--spacing-3)' }}>
+          <h1 style={{ margin: 0, fontSize: 'var(--text-heading-1-size)', fontWeight: 'var(--text-heading-1-weight)', color: 'var(--color-text-primary)' }}>
+            {recipe.title}
+          </h1>
+          <Button label="Edit" icon={<span>✎</span>} variant="secondary" size="sm" onClick={() => navigate(`/recipes/${recipe.id}/edit`)} />
+        </div>
 
         <div style={{ display: 'flex', gap: 'var(--spacing-2)', flexWrap: 'wrap', alignItems: 'center' }}>
           {recipe.status === 'draft' && <Badge label="Draft" variant="warning" />}
