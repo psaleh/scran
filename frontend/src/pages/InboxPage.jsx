@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { Badge } from '@astryxdesign/core/Badge'
 import { Button } from '@astryxdesign/core/Button'
 import { Card } from '@astryxdesign/core/Card'
@@ -22,7 +23,7 @@ const TYPE_LABELS = {
 }
 
 // DB statuses → display. 'done' is refined per job type below (a finished
-// photo import needs review; a finished categorise job is just done).
+// photo import or redraft needs review; a finished categorise job is done).
 const STATUS_META = {
   pending: { label: 'Queued', variant: 'neutral' },
   running: { label: 'Processing', variant: 'info' },
@@ -30,8 +31,13 @@ const STATUS_META = {
   failed: { label: 'Failed', variant: 'error' },
 }
 
-function JobCard({ job, onRetry }) {
-  const meta = STATUS_META[job.status]
+// Job types whose output is a draft a human must review before it becomes a
+// recipe (settled decision: AI drafts always require review).
+const REVIEW_TYPES = new Set(['photo_import', 'url_redraft'])
+
+function JobCard({ job, onRetry, onReview }) {
+  const needsReview = job.status === 'done' && REVIEW_TYPES.has(job.type)
+  const meta = needsReview ? { label: 'Needs review', variant: 'info' } : STATUS_META[job.status]
   return (
     <Card elevation="low" style={{ display: 'flex', gap: 'var(--spacing-3)' }}>
       <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 'var(--spacing-1)' }}>
@@ -75,6 +81,11 @@ function JobCard({ job, onRetry }) {
             <Button label="Retry" variant="secondary" size="sm" clickAction={() => onRetry(job.id)} />
           </div>
         )}
+        {job.type === 'url_redraft' && needsReview && job.result?.recipe && (
+          <div style={{ display: 'flex', gap: 'var(--spacing-2)', marginTop: 'var(--spacing-1)' }}>
+            <Button label="Review draft" variant="primary" size="sm" clickAction={() => onReview(job)} />
+          </div>
+        )}
       </div>
     </Card>
   )
@@ -83,6 +94,7 @@ function JobCard({ job, onRetry }) {
 /** Import inbox (spec §5.2): job list, AI endpoint status, manual retry. */
 export default function InboxPage() {
   const isDesktop = useIsDesktop()
+  const navigate = useNavigate()
   const [jobs, setJobs] = useState(null) // null = loading
   const [aiStatus, setAiStatus] = useState(null)
   const [error, setError] = useState('')
@@ -113,6 +125,15 @@ export default function InboxPage() {
     } catch (e) {
       setError(e.message)
     }
+  }
+
+  // Open a finished url_redraft result in the editor for review. Redrafts of
+  // an existing recipe open that recipe with the AI's draft pre-filled (the
+  // user still has to save); fallback extractions open a brand-new draft.
+  const review = (job) => {
+    const { recipe, recipe_id: recipeId, url, page_text: pageText } = job.result
+    const prefill = { ...recipe, source_url: url, source_page_text: pageText }
+    navigate(recipeId ? `/recipes/${recipeId}/edit` : '/recipes/new', { state: { prefill } })
   }
 
   // TEMPORARY (stage 2): enqueue a trivial AI job to verify the queue loop.
@@ -173,7 +194,7 @@ export default function InboxPage() {
           ) : jobs.length === 0 ? (
             <EmptyState title="Inbox is empty" description="Photo imports and categorisation jobs will show up here." />
           ) : (
-            jobs.map((job) => <JobCard key={job.id} job={job} onRetry={retry} />)
+            jobs.map((job) => <JobCard key={job.id} job={job} onRetry={retry} onReview={review} />)
           )}
           <div>
             {/* TEMPORARY dev button (stage 2), removed in stage 5. */}

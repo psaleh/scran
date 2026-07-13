@@ -10,10 +10,11 @@ from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
-from . import config
+from . import config, worker
 from .auth.deps import get_current_user
 from .db import get_db
 from .ingredients import enqueue_categorise_job, resolve_category
+from .jobs import _job
 
 router = APIRouter(prefix="/api", tags=["recipes"])
 
@@ -39,6 +40,9 @@ class RecipeIn(BaseModel):
     servings: int | None = None
     tags: list[str] = []
     source_url: str | None = None
+    # Readable text of the source page (URL imports only) — retained to power
+    # the AI redraft job (spec §5.5). None on updates means "keep stored text".
+    source_page_text: str | None = None
     status: str = Field(default="draft", pattern="^(draft|published)$")
     ingredients: list[IngredientIn] = []
     steps: list[str] = []
@@ -244,6 +248,9 @@ def get_recipe(
         **_summary(row),
         "description": row["description"],
         "source_url": row["source_url"],
+        # The text itself stays server-side (it can be tens of KB); the UI
+        # only needs to know whether "Tidy up with AI" is available.
+        "has_page_text": row["source_page_text"] is not None,
         "created_at": row["created_at"],
         "ingredients": ingredients,
         "steps": steps,
@@ -260,9 +267,10 @@ def create_recipe(
 ):
     cur = db.execute(
         "INSERT INTO recipes (title, description, servings, tags, source_url,"
-        " status, created_by) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        " source_page_text, status, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
         (body.title.strip(), body.description, body.servings,
-         json.dumps(body.tags), body.source_url, body.status, user["id"]),
+         json.dumps(body.tags), body.source_url, body.source_page_text,
+         body.status, user["id"]),
     )
     recipe_id = cur.lastrowid
     # A brand-new recipe starts its own version group.
@@ -282,11 +290,15 @@ def update_recipe(
     user=Depends(get_current_user),
 ):
     _get_recipe_or_404(db, recipe_id)
+    # COALESCE keeps the stored page text when the client doesn't send any —
+    # ordinary editor saves must not wipe the redraft source (spec §5.5).
     db.execute(
         "UPDATE recipes SET title = ?, description = ?, servings = ?, tags = ?,"
-        " source_url = ?, status = ?, updated_at = datetime('now') WHERE id = ?",
+        " source_url = ?, source_page_text = COALESCE(?, source_page_text),"
+        " status = ?, updated_at = datetime('now') WHERE id = ?",
         (body.title.strip(), body.description, body.servings,
-         json.dumps(body.tags), body.source_url, body.status, recipe_id),
+         json.dumps(body.tags), body.source_url, body.source_page_text,
+         body.status, recipe_id),
     )
     _save_children(db, recipe_id, body)
     db.commit()
@@ -320,11 +332,13 @@ def save_as_version(
     source = _get_recipe_or_404(db, recipe_id)
     cur = db.execute(
         "INSERT INTO recipes (title, description, servings, tags, source_url,"
-        " status, created_by, version_group, version_label)"
-        " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        " source_page_text, status, created_by, version_group, version_label)"
+        " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (body.title.strip(), body.description, body.servings,
-         json.dumps(body.tags), body.source_url, body.status, user["id"],
-         source["version_group"], (body.version_label or "").strip() or None),
+         json.dumps(body.tags), body.source_url,
+         body.source_page_text or source["source_page_text"], body.status,
+         user["id"], source["version_group"],
+         (body.version_label or "").strip() or None),
     )
     new_id = cur.lastrowid
     _save_children(db, new_id, body)
@@ -341,6 +355,32 @@ def save_as_version(
 
     db.commit()
     return get_recipe(new_id, db, user)
+
+
+@router.post("/recipes/{recipe_id}/redraft", status_code=201)
+def redraft_with_ai(
+    recipe_id: int,
+    db: sqlite3.Connection = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    """"Tidy up with AI" (spec §5.5): queue a url_redraft job for a
+    URL-imported recipe. The worker re-reads the stored page text and the
+    recipe's current saved state when the job runs, so the freshest draft
+    (including manual edits) is what gets corrected. The result lands in the
+    import inbox for review — nothing is auto-applied."""
+    row = _get_recipe_or_404(db, recipe_id)
+    if not row["source_page_text"]:
+        raise HTTPException(
+            status_code=400,
+            detail="This recipe has no stored page text — only URL imports can be tidied with AI",
+        )
+    cur = db.execute(
+        "INSERT INTO jobs (type, payload) VALUES ('url_redraft', ?)",
+        (json.dumps({"recipe_id": recipe_id, "url": row["source_url"]}),),
+    )
+    db.commit()
+    worker.wake()
+    return _job(db.execute("SELECT * FROM jobs WHERE id = ?", (cur.lastrowid,)).fetchone())
 
 
 # --- Photos --------------------------------------------------------------------

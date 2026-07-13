@@ -12,6 +12,7 @@ dependency count low, per the project conventions.
 
 import json
 import re
+import sqlite3
 import urllib.error
 import urllib.request
 from html import unescape
@@ -20,12 +21,18 @@ from html.parser import HTMLParser
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
+from . import worker
 from .auth.deps import get_current_user
+from .db import get_db
+from .jobs import _job
 
 router = APIRouter(prefix="/api", tags=["import"])
 
 FETCH_TIMEOUT_SECONDS = 15
 MAX_PAGE_BYTES = 5 * 1024 * 1024  # recipe pages are text; 5 MB is generous
+# Cap on stored page text (spec §5.5: truncate to a sane length for
+# local-model context limits). ~30k chars ≈ 8k tokens.
+MAX_PAGE_TEXT_CHARS = 30_000
 # Some sites block default urllib UAs; present as an ordinary browser.
 USER_AGENT = "Mozilla/5.0 (X11; Linux x86_64) Scran/1.0 (self-hosted recipe manager)"
 
@@ -56,6 +63,49 @@ def _fetch_html(url: str) -> str:
             status_code=502, detail="Couldn't reach that website — check the URL and try again"
         )
     return raw.decode(charset, errors="replace")
+
+
+# --- Readable page text ----------------------------------------------------------
+
+class _TextCollector(HTMLParser):
+    """Strips a page down to its readable text: everything except
+    script/style/template contents, with line breaks between block elements.
+    Rough is fine — this text is prompt fodder for the AI redraft job."""
+
+    _SKIP = {"script", "style", "template", "noscript", "svg", "head"}
+    _BLOCK = {"p", "div", "li", "ul", "ol", "h1", "h2", "h3", "h4", "h5", "h6",
+              "tr", "br", "section", "article", "header", "footer", "table"}
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.parts: list[str] = []
+        self._skip_depth = 0
+
+    def handle_starttag(self, tag, attrs):
+        if tag in self._SKIP:
+            self._skip_depth += 1
+        elif tag in self._BLOCK:
+            self.parts.append("\n")
+
+    def handle_endtag(self, tag):
+        if tag in self._SKIP and self._skip_depth:
+            self._skip_depth -= 1
+        elif tag in self._BLOCK:
+            self.parts.append("\n")
+
+    def handle_data(self, data):
+        if not self._skip_depth:
+            self.parts.append(data)
+
+
+def _page_text(html: str) -> str:
+    """Readable text of the page, whitespace-collapsed and length-capped."""
+    collector = _TextCollector()
+    collector.feed(html)
+    lines = ("".join(collector.parts)).splitlines()
+    cleaned = [" ".join(line.split()) for line in lines]
+    text = "\n".join(line for line in cleaned if line)
+    return text[:MAX_PAGE_TEXT_CHARS]
 
 
 # --- JSON-LD extraction --------------------------------------------------------
@@ -396,6 +446,8 @@ def import_from_url(body: ImportRequest, user=Depends(get_current_user)):
 
     node = _extract_json_ld_recipe(html) or _extract_microdata_recipe(html)
     if node is None:
+        # 422 signals "page fetched fine but no structured data" — the
+        # frontend offers AI extraction as a fallback (spec §3.3.2).
         raise HTTPException(
             status_code=422,
             detail="No recipe data found on that page. The site may not "
@@ -416,6 +468,30 @@ def import_from_url(body: ImportRequest, user=Depends(get_current_user)):
         "servings": _parse_servings(node.get("recipeYield")),
         "tags": _parse_tags(node),
         "source_url": url,
+        # Retained on the saved draft to power "Tidy up with AI" (spec §5.5).
+        "source_page_text": _page_text(html),
         "ingredients": _parse_ingredients(node),
         "steps": _parse_steps(node.get("recipeInstructions")),
     }
+
+
+@router.post("/import/url/ai", status_code=201)
+def import_from_url_ai(
+    body: ImportRequest,
+    db: sqlite3.Connection = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    """AI-extraction fallback for pages without schema.org data (spec §3.3.2,
+    §5.5): fetch the page, strip it to readable text, and queue a url_redraft
+    job with no draft. The result lands in the import inbox for review."""
+    url = body.url.strip()
+    text = _page_text(_fetch_html(url))
+    if not text.strip():
+        raise HTTPException(status_code=422, detail="That page has no readable text to extract from")
+    cur = db.execute(
+        "INSERT INTO jobs (type, payload) VALUES ('url_redraft', ?)",
+        (json.dumps({"url": url, "page_text": text}),),
+    )
+    db.commit()
+    worker.wake()
+    return _job(db.execute("SELECT * FROM jobs WHERE id = ?", (cur.lastrowid,)).fetchone())

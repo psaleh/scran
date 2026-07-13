@@ -13,20 +13,29 @@ editor, categories, users, auth info), and website URL import
 done and owner-tested: shared AI client (`backend/app/ai.py`), profile
 test-connection, job queue worker (`backend/app/worker.py`), jobs API
 (`backend/app/jobs.py`), and the import inbox screen
-(`frontend/src/pages/InboxPage.jsx`), plus the stage-3 categorise job
-handler (built, awaiting owner testing). **Remaining**: AI slice stages 3.5–5
-(url_redraft job + `source_page_text` migration, photo
-import + review screen, name/note cleanup job — staged plan is in the
-conversation that built stages 1–2; spec §5 has the details), PWA service
-worker.
+(`frontend/src/pages/InboxPage.jsx`), the stage-3 categorise job handler,
+manual recategorisation UI (shopping-list row dialog + editor per-row
+selector), and stage 3.5 (url_redraft job, `source_page_text` migration 005,
+AI-extraction fallback, "Tidy up with AI") — stages 3/3.5 await owner
+testing. **Remaining**: AI slice stages 4–5 (photo import + review screen,
+name/note cleanup job — spec §5 has the details), PWA service worker.
 
 ## AI slice — state after stage 2 (read before building stage 3)
 
 - **Build stages one at a time and STOP after each** so the owner can test:
-  stage 3 (categorise) is done, next is 3.5 (url_redraft + AI-extraction
-  fallback for schema.org-less pages), 4 (photo import + review screen),
-  5 (cleanup job + remove the temporary "Enqueue test job" button in
-  `InboxPage.jsx` and `POST /api/jobs/test` in `jobs.py`).
+  stages 3 (categorise) and 3.5 (url_redraft) are done, next is 4 (photo
+  import + review screen), then 5 (cleanup job + remove the temporary
+  "Enqueue test job" button in `InboxPage.jsx` and `POST /api/jobs/test`
+  in `jobs.py`).
+- Stage 3.5 shape: `_url_redraft_job` in `worker.py` handles both redraft
+  (payload `{recipe_id, url}`; page text + current saved draft read from DB
+  at run time) and fallback extraction (payload `{url, page_text}`, result
+  carries `page_text` so the saved draft stays redraftable). Reviewing a
+  url_redraft result navigates to the editor with `prefill` router state;
+  the editor skips overwriting form fields from the API load when a prefill
+  is present, and `PUT /api/recipes/{id}` uses COALESCE so a null
+  `source_page_text` keeps the stored text. `_coerce_recipe` +
+  `RECIPE_JSON_SPEC` in `worker.py` are reusable for stage 4's photo import.
 - `backend/app/ai.py` is the **only** place that talks to AI endpoints.
   Stdlib urllib only (no httpx/requests — deliberate). `chat()` accepts the
   multimodal content-list form for vision. Log summaries only, never

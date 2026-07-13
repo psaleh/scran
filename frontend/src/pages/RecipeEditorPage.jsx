@@ -164,6 +164,10 @@ export default function RecipeEditorPage() {
   const [versionDialogOpen, setVersionDialogOpen] = useState(false)
   const [versionLabel, setVersionLabel] = useState('')
   const [categories, setCategories] = useState([])
+  // True when the server holds page text for this recipe (URL imports) —
+  // enables the "Tidy up with AI" redraft action (spec §5.5).
+  const [hasPageText, setHasPageText] = useState(false)
+  const [tidyBusy, setTidyBusy] = useState(false)
   const fileInput = useRef(null)
 
   useEffect(() => {
@@ -174,18 +178,24 @@ export default function RecipeEditorPage() {
     if (id === undefined) return
     api(`/api/recipes/${id}`)
       .then((r) => {
-        setTitle(r.title)
-        setDescription(r.description)
-        setServings(r.servings ?? 4)
-        setTags(r.tags)
-        setSourceUrl(r.source_url)
+        // When an AI redraft arrives via router state (review flow from the
+        // import inbox), the prefill IS the proposed content — only pick up
+        // the bits the draft doesn't carry (photo, status, page-text flag).
+        if (!prefill) {
+          setTitle(r.title)
+          setDescription(r.description)
+          setServings(r.servings ?? 4)
+          setTags(r.tags)
+          setSourceUrl(r.source_url)
+          setIngredients(
+            r.ingredients.length
+              ? r.ingredients.map((i) => ({ ...newIngredient(), ...i, amount: i.amount == null ? '' : String(i.amount), unit: i.unit ?? '', note: i.note ?? '' }))
+              : [newIngredient()],
+          )
+          setSteps(r.steps.length ? r.steps : [''])
+        }
         setStatus(r.status)
-        setIngredients(
-          r.ingredients.length
-            ? r.ingredients.map((i) => ({ ...newIngredient(), ...i, amount: i.amount == null ? '' : String(i.amount), unit: i.unit ?? '', note: i.note ?? '' }))
-            : [newIngredient()],
-        )
-        setSteps(r.steps.length ? r.steps : [''])
+        setHasPageText(Boolean(r.has_page_text))
         setExistingPhoto(r.photo_path)
         setLoaded(true)
       })
@@ -227,6 +237,9 @@ export default function RecipeEditorPage() {
       servings,
       tags: finalTags,
       source_url: sourceUrl,
+      // Page text rides along from URL/AI imports so the saved draft can be
+      // redrafted later; null on ordinary saves means "keep what's stored".
+      source_page_text: prefill?.source_page_text ?? null,
       status: saveStatus,
       ingredients: ingredients
         .filter((i) => i.name.trim())
@@ -268,6 +281,22 @@ export default function RecipeEditorPage() {
       await finishSave(saved)
     } catch (err) {
       setError(err.message)
+    }
+  }
+
+  // "Tidy up with AI" (spec §5.5): save the current draft, then queue a
+  // redraft job. The worker reads the saved state, so edits made here are
+  // what the AI corrects. The result appears in the import inbox for review.
+  const tidyWithAi = async () => {
+    if (!validate() || tidyBusy) return
+    setTidyBusy(true)
+    try {
+      await api(`/api/recipes/${id}`, { method: 'PUT', body: buildBody(status) })
+      await api(`/api/recipes/${id}/redraft`, { method: 'POST' })
+      navigate('/inbox')
+    } catch (err) {
+      setError(err.message)
+      setTidyBusy(false)
     }
   }
 
@@ -350,7 +379,20 @@ export default function RecipeEditorPage() {
         <div style={{ maxWidth: isDesktop ? 1200 : 'none', margin: '0 auto', padding: isDesktop ? 'var(--spacing-6)' : 0 }}>
           <div style={{ padding: isDesktop ? '0 0 var(--spacing-4)' : 'var(--spacing-4)', display: 'flex', flexDirection: 'column', gap: 'var(--spacing-4)' }}>
             {error && <Banner status="error" title={error} />}
-            {sourceUrl && <Badge label={`Imported from ${sourceUrl}`} variant="info" />}
+            {sourceUrl && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--spacing-2)', flexWrap: 'wrap' }}>
+                <Badge label={`Imported from ${sourceUrl}`} variant="info" />
+                {id !== undefined && hasPageText && (
+                  <Button
+                    label={tidyBusy ? 'Queueing…' : 'Tidy up with AI'}
+                    variant="secondary"
+                    size="sm"
+                    clickAction={tidyWithAi}
+                    isDisabled={tidyBusy}
+                  />
+                )}
+              </div>
+            )}
 
             {/* Photo upload: tap the placeholder/photo to pick a file */}
             <input ref={fileInput} type="file" accept="image/jpeg,image/png,image/webp" onChange={choosePhoto} style={{ display: 'none' }} />

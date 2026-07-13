@@ -312,6 +312,150 @@ def _categorise_job(conn, profile, payload):
     return {"applied": len(applied), "categories": applied}
 
 
+RECIPE_JSON_SPEC = """\
+Reply with ONLY a JSON object in exactly this shape:
+{"title": str, "description": str, "servings": int or null,
+ "ingredients": [{"amount": number or null, "unit": str or null,
+                  "name": str, "note": str or null}],
+ "steps": [str]}
+
+Rules for ingredients: "name" must contain ONLY the bare purchasable item —
+what you'd write on a shopping list. Preparation ("finely diced"), size
+("small", "large"), and qualifiers ("optional", "divided") go in "note".
+Keep amounts as plain numbers (no fractions like "1/2" — use 0.5)."""
+
+REDRAFT_PROMPT = """\
+Here is the readable text of a recipe web page{draft_clause}.
+Extract the recipe, correcting any mistakes in the draft against the page.
+
+{spec}
+
+--- PAGE TEXT ---
+{page_text}
+{draft_section}"""
+
+
+def _coerce_recipe(data):
+    """Validate/repair the model's recipe JSON into editor-ready shape
+    (spec §5.3: parse defensively, tolerate nulls). Raises ValueError only
+    when there is no usable recipe at all — a failed attempt should retry."""
+    if not isinstance(data, dict):
+        raise ValueError("model reply was not a JSON object")
+
+    def text(v):
+        return str(v).strip() if v is not None and not isinstance(v, (list, dict)) else ""
+
+    title = text(data.get("title"))
+    if not title:
+        raise ValueError("model reply has no recipe title")
+
+    servings = data.get("servings")
+    try:
+        servings = max(1, int(servings)) if servings is not None else None
+    except (TypeError, ValueError):
+        servings = None
+
+    ingredients = []
+    for raw in data.get("ingredients") or []:
+        if isinstance(raw, str):
+            raw = {"name": raw}
+        if not isinstance(raw, dict) or not text(raw.get("name")):
+            continue
+        amount = raw.get("amount")
+        try:
+            amount = round(float(amount), 2) if amount is not None else None
+        except (TypeError, ValueError):
+            amount = None
+        ingredients.append({
+            "amount": amount,
+            "unit": text(raw.get("unit")) or None,
+            "name": text(raw.get("name")),
+            "note": text(raw.get("note")) or None,
+            "category_id": None,
+            "scalable": True,
+        })
+
+    steps = [text(s) for s in data.get("steps") or [] if text(s)]
+    return {
+        "title": title,
+        "description": text(data.get("description")),
+        "servings": servings,
+        "ingredients": ingredients,
+        "steps": steps,
+    }
+
+
+@handles("url_redraft")
+def _url_redraft_job(conn, profile, payload):
+    """URL import redraft / AI extraction fallback (spec §5.5).
+
+    Two modes share this handler:
+    - redraft: payload has recipe_id — page text and the *current saved
+      draft* are read from the DB at run time, and the model corrects the
+      draft against the page.
+    - fallback extraction: payload has page_text and no recipe_id — the
+      model extracts a recipe from the page text alone.
+    The result JSON is a revised draft the inbox offers for review; nothing
+    is applied to any recipe automatically.
+    """
+    recipe_id = payload.get("recipe_id")
+    draft = None
+    if recipe_id is not None:
+        row = conn.execute("SELECT * FROM recipes WHERE id = ?", (recipe_id,)).fetchone()
+        if row is None:
+            raise ValueError(f"recipe {recipe_id} no longer exists")
+        page_text = row["source_page_text"] or ""
+        draft = {
+            "title": row["title"],
+            "description": row["description"],
+            "servings": row["servings"],
+            "ingredients": [
+                {"amount": r["amount"], "unit": r["unit"], "name": r["name"], "note": r["note"]}
+                for r in conn.execute(
+                    "SELECT * FROM ingredients WHERE recipe_id = ? ORDER BY position",
+                    (recipe_id,),
+                )
+            ],
+            "steps": [
+                r["text"]
+                for r in conn.execute(
+                    "SELECT text FROM steps WHERE recipe_id = ? ORDER BY position",
+                    (recipe_id,),
+                )
+            ],
+        }
+    else:
+        page_text = payload.get("page_text", "")
+    if not page_text.strip():
+        raise ValueError("no stored page text to work from")
+
+    prompt = REDRAFT_PROMPT.format(
+        draft_clause=(
+            " and a possibly-flawed structured draft extracted from it" if draft else ""
+        ),
+        spec=RECIPE_JSON_SPEC,
+        page_text=page_text,
+        draft_section=(
+            "\n--- CURRENT DRAFT (correct this) ---\n" + json.dumps(draft)
+            if draft else ""
+        ),
+    )
+    reply = ai.chat(profile, [{"role": "user", "content": prompt}])
+    recipe = _coerce_recipe(_extract_json(reply))
+    result = {
+        "recipe": recipe,
+        "recipe_id": recipe_id,
+        "url": payload.get("url"),
+        "ingredients": len(recipe["ingredients"]),
+        "steps": len(recipe["steps"]),
+    }
+    if recipe_id is None:
+        # Fallback extraction creates a brand-new draft: carry the page text
+        # into the result so the saved draft can be redrafted later too.
+        result["page_text"] = page_text
+    return result
+
+
 @handles("test")
 def _test_job(conn, profile, payload):
     """Trivial round-trip for the temporary dev button (stage 2 verification)."""
