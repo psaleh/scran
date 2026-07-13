@@ -24,7 +24,11 @@ def connect() -> sqlite3.Connection:
     FastAPI endpoints get one connection per request via the `get_db`
     dependency below; scripts and the worker can call this directly.
     """
-    conn = sqlite3.connect(config.DB_PATH)
+    # check_same_thread=False: FastAPI runs sync endpoints in a threadpool, so
+    # the request's connection may be used from a different thread than the
+    # one that opened it. Each connection is per-request (never shared
+    # concurrently), so this is safe.
+    conn = sqlite3.connect(config.DB_PATH, check_same_thread=False)
     conn.row_factory = sqlite3.Row  # rows behave like dicts: row["name"]
     conn.execute("PRAGMA journal_mode = WAL")
     conn.execute("PRAGMA foreign_keys = ON")

@@ -20,6 +20,8 @@ from .auth.passwords import hash_password
 from .auth.routes import router as auth_router
 from .ingredients import router as ingredients_router
 from .recipes import router as recipes_router
+from .settings import router as settings_router
+from .shopping import router as shopping_router
 
 log = logging.getLogger("scran")
 logging.basicConfig(level=logging.INFO)
@@ -61,6 +63,8 @@ app = FastAPI(title="Scran", lifespan=lifespan)
 app.include_router(auth_router)
 app.include_router(recipes_router)
 app.include_router(ingredients_router)
+app.include_router(shopping_router)
+app.include_router(settings_router)
 
 
 @app.get("/api/health")

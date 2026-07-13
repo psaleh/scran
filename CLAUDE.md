@@ -4,6 +4,14 @@ Household recipe manager + shopping list, self-hosted in a single Docker
 container. The full spec is `recipe-app-spec.md` — read the relevant section
 before building a feature, and respect §8 "Settled decisions (do not relitigate)".
 
+**Built so far**: auth + sessions, recipe CRUD/browse/detail/editor with FTS5
+search, cooking notes, photo upload, recipe versions ("save as version",
+migration 002), shopping list (copy-from-recipe, store-ordered grouping),
+stores/categories, and the Settings screens (AI profiles, stores route
+editor, categories, users, auth info). **Remaining**: website URL import, AI
+job queue worker + import inbox (jobs already queue as `pending`), PWA
+service worker.
+
 ## Owner context
 
 The maintainer is an IT infrastructure engineer learning React with this
@@ -18,7 +26,9 @@ well-commented code (function components + hooks, no exotic patterns).
   design system** (`@astryxdesign/core`, pre-built stylesheet path — no StyleX
   build plugin). Component rules live in `frontend/.claude/CLAUDE.md`;
   use `cd frontend && npx astryx build/component/template` before writing UI.
-  Gotcha: the theme provider export is `Theme`, not `XDSTheme`.
+  Gotchas: the theme provider export is `Theme`, not `XDSTheme`; `Tab` and
+  `TabList` are exported from `@astryxdesign/core/TabList` (there is no
+  `/Tabs` subpath).
 - **Design source of truth**: Claude Design project "Recipe App"
   (id `b5f5ec45-0fc4-4633-8481-6b81a6d56147`, via the DesignSync tool /
   claude_design MCP). Screen mockups are under `ui_kits/recipe-app/` —
@@ -37,6 +47,13 @@ well-commented code (function components + hooks, no exotic patterns).
   and by Vite (proxying `/api` to :8000) in development.
 - **Ingredients**: every save goes through the categorisation flow in
   `backend/app/ingredients.py` (lookup table first, AI job queue on miss).
+  Manual recategorisation anywhere must write back to `ingredient_lookup`.
+- **SQLite connections**: always open via `app/db.py` `connect()` — it sets
+  WAL, foreign keys, and `check_same_thread=False` (FastAPI's threadpool may
+  run an endpoint on a different thread than the one that opened the
+  connection; omitting it causes intermittent 500s).
+- **AI profile API keys** stay server-side: API responses expose `has_key`
+  only, and a blank key on update means "keep the stored key".
 - Shopping list items are copies with a `recipe_id` tag, never live links.
 - AI-imported recipes are always `draft` until a human publishes.
 - Frontend styling: Astryx components first; for layout containers use inline
@@ -63,8 +80,20 @@ Dev data lands in `backend/data/` (gitignored). Uploads are served at
 
 ## Verifying changes
 
-Build the frontend, start the backend, and drive the real app — there is a
-working pattern using `puppeteer-core` (devDependency) with the system
-Chromium at `/usr/bin/chromium` against `http://localhost:8000` after
-`npm run build`. Screenshot at 390×844 (mobile-first) and check desktop
-≥1024px too.
+**`backend/data/` is the owner's live dev database — never wipe it, inject
+test rows into it, or occupy port 8000 for testing.** Run tests against an
+isolated instance instead:
+
+```bash
+cd backend && SCRAN_DB_PATH=/tmp/scran-test.db SCRAN_UPLOADS_PATH=/tmp/scran-test-uploads \
+  SCRAN_ADMIN_USERNAME=admin SCRAN_ADMIN_PASSWORD=changeme12 \
+  .venv/bin/uvicorn app.main:app --port 8010
+```
+
+Build the frontend (`npm run build` — the test server serves `frontend/dist`),
+then drive the real app with `puppeteer-core` (devDependency) and the system
+Chromium at `/usr/bin/chromium`. Screenshot at 390×844 (mobile-first) and
+check desktop ≥1024px too. Test-script quirks: Astryx `Tab` buttons duplicate
+their label in `textContent` ("StoresStores"), uppercase section headers are
+CSS `text-transform` (so `innerText` returns uppercase), and `textarea`
+values don't appear in `innerText`.

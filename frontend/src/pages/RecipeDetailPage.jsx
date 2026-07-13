@@ -23,7 +23,7 @@ function formatAmount(n) {
   return String(Math.round(n * 100) / 100)
 }
 
-function IngredientRow({ ingredient, scale }) {
+function IngredientRow({ ingredient, scale, onAdd, added }) {
   const amount =
     ingredient.scalable && ingredient.amount != null
       ? ingredient.amount * scale
@@ -37,6 +37,12 @@ function IngredientRow({ ingredient, scale }) {
       <div style={{ flex: 1, minWidth: 0, fontSize: 'var(--font-size-xl)', color: 'var(--color-text-primary)' }}>
         {ingredient.name}
       </div>
+      <IconButton
+        label={added ? 'Added to list' : 'Add to shopping list'}
+        icon={<span>{added ? '✓' : '+'}</span>}
+        variant={added ? 'secondary' : 'ghost'}
+        onClick={() => onAdd(ingredient.id)}
+      />
     </div>
   )
 }
@@ -142,6 +148,8 @@ export default function RecipeDetailPage({ currentUser }) {
   const [recipe, setRecipe] = useState(null)
   const [error, setError] = useState('')
   const [servings, setServings] = useState(null)
+  // Ingredient ids briefly shown with a ✓ after being sent to the list.
+  const [addedIds, setAddedIds] = useState({})
 
   const load = () => {
     api(`/api/recipes/${id}`)
@@ -169,6 +177,35 @@ export default function RecipeDetailPage({ currentUser }) {
 
   const baseServings = recipe.servings || 1
   const scale = (servings || baseServings) / baseServings
+
+  // Send ingredients to the shopping list. Items are copies of the STORED
+  // amounts (scaling is display-only, spec §3.4 / §3.1).
+  const flashAdded = (ids) => {
+    setAddedIds((m) => ({ ...m, ...Object.fromEntries(ids.map((i) => [i, true])) }))
+    setTimeout(() => {
+      setAddedIds((m) => {
+        const next = { ...m }
+        ids.forEach((i) => delete next[i])
+        return next
+      })
+    }, 1400)
+  }
+
+  const addToList = async (ingredientId) => {
+    await api('/api/shopping/from-recipe', {
+      method: 'POST',
+      body: { recipe_id: recipe.id, ingredient_ids: [ingredientId] },
+    })
+    flashAdded([ingredientId])
+  }
+
+  const addAllToList = async () => {
+    await api('/api/shopping/from-recipe', {
+      method: 'POST',
+      body: { recipe_id: recipe.id },
+    })
+    flashAdded(recipe.ingredients.map((i) => i.id))
+  }
 
   const leftColumn = (
     <>
@@ -244,15 +281,18 @@ export default function RecipeDetailPage({ currentUser }) {
         </div>
       </div>
 
-      <div style={{ padding: isDesktop ? '0 0 var(--spacing-2)' : '0 var(--spacing-4)', marginBottom: 'var(--spacing-2)' }}>
+      <div style={{ padding: isDesktop ? '0 0 var(--spacing-2)' : '0 var(--spacing-4)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 'var(--spacing-2)' }}>
         <span style={sectionLabelStyle}>Ingredients</span>
+        {recipe.ingredients.length > 0 && (
+          <Button label="Add all to list" variant="primary" size="sm" clickAction={addAllToList} />
+        )}
       </div>
 
       <Card padding={0} style={{ margin: isDesktop ? 0 : '0 var(--spacing-4)' }}>
         {recipe.ingredients.map((ing, i) => (
           <div key={ing.id}>
             {i > 0 && <Divider />}
-            <IngredientRow ingredient={ing} scale={scale} />
+            <IngredientRow ingredient={ing} scale={scale} onAdd={addToList} added={!!addedIds[ing.id]} />
           </div>
         ))}
         {recipe.ingredients.length === 0 && (

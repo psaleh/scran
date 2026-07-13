@@ -6,9 +6,9 @@ import { useIsDesktop } from '../useIsDesktop.js'
 // listed but disabled so the layout matches the final app.
 const NAV_ITEMS = [
   { key: 'recipes', label: 'Recipes', to: '/' },
-  { key: 'shopping', label: 'Shopping list', to: '/shopping', disabled: true },
+  { key: 'shopping', label: 'Shopping list', to: '/shopping' },
   { key: 'inbox', label: 'Import inbox', to: '/inbox', disabled: true },
-  { key: 'settings', label: 'Settings', to: '/settings', disabled: true },
+  { key: 'settings', label: 'Settings', to: '/settings' },
 ]
 
 function Wordmark() {

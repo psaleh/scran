@@ -9,6 +9,8 @@ import LoginPage from './pages/LoginPage.jsx'
 import BrowsePage from './pages/BrowsePage.jsx'
 import RecipeDetailPage from './pages/RecipeDetailPage.jsx'
 import RecipeEditorPage from './pages/RecipeEditorPage.jsx'
+import SettingsPage from './pages/SettingsPage.jsx'
+import ShoppingListPage from './pages/ShoppingListPage.jsx'
 import { useIsDesktop } from './useIsDesktop.js'
 
 /** Signed-in app shell: desktop gets a top nav, mobile a bottom tab bar. */
@@ -23,6 +25,8 @@ function Shell({ user }) {
           <Route path="/recipes/new" element={<RecipeEditorPage />} />
           <Route path="/recipes/:id" element={<RecipeDetailPage currentUser={user} />} />
           <Route path="/recipes/:id/edit" element={<RecipeEditorPage />} />
+          <Route path="/shopping" element={<ShoppingListPage />} />
+          <Route path="/settings" element={<SettingsPage currentUser={user} />} />
         </Routes>
       </div>
       {!isDesktop && <AppNav />}
