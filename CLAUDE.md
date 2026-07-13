@@ -9,9 +9,60 @@ search, cooking notes, photo upload, recipe versions ("save as version",
 migration 002), shopping list (copy-from-recipe, store-ordered grouping),
 stores/categories, and the Settings screens (AI profiles, stores route
 editor, categories, users, auth info), and website URL import
-(`backend/app/importer.py`, JSON-LD + microdata). **Remaining**: AI job
-queue worker + import inbox (jobs already queue as `pending`), PWA service
+(`backend/app/importer.py`, JSON-LD + microdata). AI slice stages 1–2 are
+done and owner-tested: shared AI client (`backend/app/ai.py`), profile
+test-connection, job queue worker (`backend/app/worker.py`), jobs API
+(`backend/app/jobs.py`), and the import inbox screen
+(`frontend/src/pages/InboxPage.jsx`), plus the stage-3 categorise job
+handler (built, awaiting owner testing). **Remaining**: AI slice stages 3.5–5
+(url_redraft job + `source_page_text` migration, photo
+import + review screen, name/note cleanup job — staged plan is in the
+conversation that built stages 1–2; spec §5 has the details), PWA service
 worker.
+
+## AI slice — state after stage 2 (read before building stage 3)
+
+- **Build stages one at a time and STOP after each** so the owner can test:
+  stage 3 (categorise) is done, next is 3.5 (url_redraft + AI-extraction
+  fallback for schema.org-less pages), 4 (photo import + review screen),
+  5 (cleanup job + remove the temporary "Enqueue test job" button in
+  `InboxPage.jsx` and `POST /api/jobs/test` in `jobs.py`).
+- `backend/app/ai.py` is the **only** place that talks to AI endpoints.
+  Stdlib urllib only (no httpx/requests — deliberate). `chat()` accepts the
+  multimodal content-list form for vision. Log summaries only, never
+  payloads or keys.
+- Worker: single daemon thread (started in `main.py` lifespan). Register
+  job handlers in `worker.py` with `@handles("<type>")` — pending jobs
+  whose type has no handler are silently left alone (that's why pre-stage-3
+  `categorise` jobs sit harmlessly in the queue). Handler signature:
+  `fn(conn, profile, payload_dict) -> result dict`; raise to trigger
+  retry/backoff (3 attempts: 60s, 120s). Call `worker.wake()` after
+  enqueueing from any endpoint so the job runs immediately.
+- Endpoint-down behaviour: worker probes (`ai.probe`, GET /models, 5s
+  timeout) before running jobs; unreachable → jobs stay pending, re-poll
+  every 120s. `GET /api/ai-status` serves the worker's *cached* probe (≤60s
+  old) so the inbox loads instantly — don't make it probe live.
+- Jobs table CHECK now allows photo_import|categorise|url_redraft|
+  name_note_cleanup|test (migration 004 rebuilt the table). `GET /api/jobs`
+  returns a per-type `summary` string, not raw payloads — extend `_job()`
+  in `jobs.py` when adding a type. UI maps DB statuses pending/running/
+  done/failed to Queued/Processing/Done/Failed in `InboxPage.jsx`
+  (`STATUS_META`); photo_import 'done' should display as "needs review".
+- Astryx gotcha: `StatusDot` takes `variant` (success|error|…) + required
+  `label`, not `status`. Design mockups live in the Claude Design project
+  (DesignSync tool), not on disk — `ui_kits/recipe-app/import-inbox.html`
+  was the template for InboxPage.
+- Stage 3 (built, untested by owner): `_categorise_job` in `worker.py` asks
+  the model for a name→category JSON mapping (`_extract_json` strips fences),
+  falls back to "other" for unknown categories, and writes back to
+  `ingredient_lookup` + still-NULL `ingredients`/`shopping_items` rows only —
+  manual overrides made while queued always win (backfilled from lookup, no
+  AI call). `enqueue_categorise_job()` now calls `worker.wake()`.
+- Testing gotcha: `pkill -f <pattern>` from the Bash tool matches its own
+  wrapper shell and kills it (exit 144) — use a bracket pattern like
+  `pkill -f "fake_a[i].py"`. A fake OpenAI-compatible server for tests is
+  at scratchpad `fake_ai.py` (port 8021; port 8020 is taken by an unknown
+  long-lived process).
 
 ## Owner context
 

@@ -7,6 +7,7 @@ import { CheckboxInput } from '@astryxdesign/core/CheckboxInput'
 import { Divider } from '@astryxdesign/core/Divider'
 import { IconButton } from '@astryxdesign/core/IconButton'
 import { NumberInput } from '@astryxdesign/core/NumberInput'
+import { Selector } from '@astryxdesign/core/Selector'
 import { Spinner } from '@astryxdesign/core/Spinner'
 import { TextArea } from '@astryxdesign/core/TextArea'
 import { TextInput } from '@astryxdesign/core/TextInput'
@@ -25,7 +26,7 @@ const newIngredient = () => ({ rowId: nextRowId++, amount: '', unit: '', name: '
  * Free text is always allowed; picking a suggestion silently attaches the
  * known category.
  */
-function IngredientRow({ ing, onChange, onRemove }) {
+function IngredientRow({ ing, categories, onChange, onRemove }) {
   const [suggestions, setSuggestions] = useState([])
   const [open, setOpen] = useState(false)
   const blurTimer = useRef(null)
@@ -58,7 +59,7 @@ function IngredientRow({ ing, onChange, onRemove }) {
           <TextInput label="Unit" isLabelHidden value={ing.unit} onChange={(v) => onChange({ ...ing, unit: v })} placeholder="unit" />
         </div>
         <div
-          style={{ flex: 1, position: 'relative' }}
+          style={{ flex: 1, minWidth: 0, position: 'relative' }}
           onFocus={() => { clearTimeout(blurTimer.current); setOpen(true) }}
           onBlur={() => { blurTimer.current = setTimeout(() => setOpen(false), 150) }}
         >
@@ -88,13 +89,30 @@ function IngredientRow({ ing, onChange, onRemove }) {
         <IconButton label="Remove ingredient" icon={<span>×</span>} variant="ghost" onClick={onRemove} />
       </div>
       {/* Prep/size/qualifiers live here, keeping the name shoppable (spec §3.2). */}
-      <TextInput
-        label="Note"
-        isLabelHidden
-        value={ing.note}
-        onChange={(v) => onChange({ ...ing, note: v })}
-        placeholder="Note, e.g. finely diced (optional)"
-      />
+      <div style={{ display: 'flex', gap: 'var(--spacing-2)', flexWrap: 'wrap' }}>
+        <div style={{ flex: '1 1 180px', minWidth: 0 }}>
+          <TextInput
+            label="Note"
+            isLabelHidden
+            value={ing.note}
+            onChange={(v) => onChange({ ...ing, note: v })}
+            placeholder="Note, e.g. finely diced (optional)"
+          />
+        </div>
+        {/* Manual category override (spec §3.6.4). Empty = let the lookup
+            table / AI categorisation decide on save. */}
+        <div style={{ flex: '1 1 140px', minWidth: 0 }}>
+          <Selector
+            label="Category"
+            isLabelHidden
+            placeholder="Category (auto)"
+            hasClear
+            options={categories.map((c) => ({ value: String(c.id), label: c.name }))}
+            value={ing.category_id == null ? undefined : String(ing.category_id)}
+            onChange={(v) => onChange({ ...ing, category_id: v == null ? null : Number(v) })}
+          />
+        </div>
+      </div>
       <CheckboxInput label="Scales with servings" size="sm" value={ing.scalable} onChange={(v) => onChange({ ...ing, scalable: v })} />
     </div>
   )
@@ -145,7 +163,12 @@ export default function RecipeEditorPage() {
   const [existingPhoto, setExistingPhoto] = useState(null)
   const [versionDialogOpen, setVersionDialogOpen] = useState(false)
   const [versionLabel, setVersionLabel] = useState('')
+  const [categories, setCategories] = useState([])
   const fileInput = useRef(null)
+
+  useEffect(() => {
+    api('/api/categories').then(setCategories).catch(() => {})
+  }, [])
 
   useEffect(() => {
     if (id === undefined) return
@@ -385,7 +408,7 @@ export default function RecipeEditorPage() {
           </div>
 
           <div style={{ display: 'grid', gridTemplateColumns: isDesktop ? '1fr 1fr' : '1fr', gap: isDesktop ? 'var(--spacing-6)' : 0, alignItems: 'start' }}>
-            <div>
+            <div style={{ minWidth: 0 }}>
               <div style={{ padding: isDesktop ? '0 0 var(--spacing-2)' : '0 var(--spacing-4)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 'var(--spacing-2)' }}>
                 <span style={sectionLabelStyle}>Ingredients</span>
                 <Button label="Add ingredient" variant="secondary" size="sm" onClick={() => setIngredients([...ingredients, newIngredient()])} />
@@ -394,13 +417,13 @@ export default function RecipeEditorPage() {
                 {ingredients.map((ing, i) => (
                   <div key={ing.rowId}>
                     {i > 0 && <Divider />}
-                    <IngredientRow ing={ing} onChange={(next) => updateIngredient(ing.rowId, next)} onRemove={() => removeIngredient(ing.rowId)} />
+                    <IngredientRow ing={ing} categories={categories} onChange={(next) => updateIngredient(ing.rowId, next)} onRemove={() => removeIngredient(ing.rowId)} />
                   </div>
                 ))}
               </Card>
             </div>
 
-            <div>
+            <div style={{ minWidth: 0 }}>
               <div style={{ padding: isDesktop ? '0 0 var(--spacing-2)' : 'var(--spacing-5) var(--spacing-4) 0', display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 'var(--spacing-2)' }}>
                 <span style={sectionLabelStyle}>Steps</span>
                 <Button label="Add step" variant="secondary" size="sm" onClick={() => setSteps([...steps, ''])} />

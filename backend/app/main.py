@@ -15,11 +15,12 @@ from fastapi import FastAPI
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import config, db
+from . import config, db, worker
 from .auth.passwords import hash_password
 from .auth.routes import router as auth_router
 from .importer import router as importer_router
 from .ingredients import router as ingredients_router
+from .jobs import router as jobs_router
 from .recipes import router as recipes_router
 from .settings import router as settings_router
 from .shopping import router as shopping_router
@@ -56,7 +57,9 @@ async def lifespan(app: FastAPI):
         log.info("Applied migrations: %s", ", ".join(applied))
     os.makedirs(config.UPLOADS_PATH, exist_ok=True)
     _bootstrap_admin()
+    worker.start()
     yield
+    worker.stop()
 
 
 app = FastAPI(title="Scran", lifespan=lifespan)
@@ -66,6 +69,7 @@ app.include_router(recipes_router)
 app.include_router(ingredients_router)
 app.include_router(importer_router)
 app.include_router(shopping_router)
+app.include_router(jobs_router)
 app.include_router(settings_router)
 
 

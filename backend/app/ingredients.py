@@ -10,6 +10,7 @@ import sqlite3
 
 from fastapi import APIRouter, Depends, Query
 
+from . import worker
 from .auth.deps import get_current_user
 from .db import get_db
 
@@ -72,7 +73,7 @@ def resolve_category(
 def enqueue_categorise_job(db: sqlite3.Connection, names: list[str]) -> None:
     """Queue one batched AI categorisation job for unknown names (spec §5.4).
 
-    The worker (later phase) picks these up; until then rows just wait in
+    If no AI endpoint is configured or reachable the job just waits in
     'pending', which is exactly the graceful-degradation behaviour §7 asks for.
     """
     unique = sorted({normalise(n) for n in names if normalise(n)})
@@ -82,6 +83,10 @@ def enqueue_categorise_job(db: sqlite3.Connection, names: list[str]) -> None:
         "INSERT INTO jobs (type, payload) VALUES ('categorise', ?)",
         (json.dumps({"names": unique}),),
     )
+    # Nudge the worker so the job runs immediately. The caller commits just
+    # after this; worst case the worker's first look misses the row and the
+    # next 15s poll picks it up.
+    worker.wake()
 
 
 @router.get("/ingredients/suggest")

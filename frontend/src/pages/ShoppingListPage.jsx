@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Badge } from '@astryxdesign/core/Badge'
 import { Button } from '@astryxdesign/core/Button'
 import { Card } from '@astryxdesign/core/Card'
+import { Dialog } from '@astryxdesign/core/Dialog'
 import { Divider } from '@astryxdesign/core/Divider'
 import { EmptyState } from '@astryxdesign/core/EmptyState'
 import { IconButton } from '@astryxdesign/core/IconButton'
@@ -20,7 +21,7 @@ const SWIPE_THRESHOLD = 140
  * - tap toggles checked (strike-through)
  * - swipe right = toggle checked, swipe left = remove
  */
-function ItemRow({ item, onToggle, onRemove }) {
+function ItemRow({ item, onToggle, onRemove, onRecategorise }) {
   const [dx, setDx] = useState(0)
   const dragRef = useRef(null)
 
@@ -122,12 +123,27 @@ function ItemRow({ item, onToggle, onRemove }) {
             </div>
           )}
         </div>
+        {/* Recategorise (spec §3.6.4). Stop pointer events so the tap doesn't
+            also toggle the item or start a swipe. */}
+        <div
+          onPointerDown={(e) => e.stopPropagation()}
+          onPointerUp={(e) => e.stopPropagation()}
+          style={{ flexShrink: 0 }}
+        >
+          <IconButton
+            label="Change category"
+            icon={<span>⊞</span>}
+            variant="ghost"
+            size="sm"
+            onClick={() => onRecategorise(item)}
+          />
+        </div>
       </div>
     </div>
   )
 }
 
-function CategorySection({ label, items, onToggle, onRemove }) {
+function CategorySection({ label, items, onToggle, onRemove, onRecategorise }) {
   return (
     <div>
       <div style={{ ...sectionLabelStyle, padding: 'var(--spacing-3) var(--spacing-4) var(--spacing-1)' }}>
@@ -137,7 +153,7 @@ function CategorySection({ label, items, onToggle, onRemove }) {
         {items.map((item, i) => (
           <div key={item.id}>
             {i > 0 && <Divider />}
-            <ItemRow item={item} onToggle={onToggle} onRemove={onRemove} />
+            <ItemRow item={item} onToggle={onToggle} onRemove={onRemove} onRecategorise={onRecategorise} />
           </div>
         ))}
       </Card>
@@ -161,6 +177,9 @@ export default function ShoppingListPage() {
   const [suggestions, setSuggestions] = useState([])
   const [suggestOpen, setSuggestOpen] = useState(false)
   const blurTimer = useRef(null)
+
+  // Item being recategorised via the per-row dialog (null = closed).
+  const [recatItem, setRecatItem] = useState(null)
 
   useEffect(() => {
     api('/api/shopping').then(setItems).catch(() => setItems([]))
@@ -217,6 +236,17 @@ export default function ShoppingListPage() {
   const removeItem = async (item) => {
     setItems((list) => list.filter((i) => i.id !== item.id))
     await api(`/api/shopping/${item.id}`, { method: 'DELETE' })
+  }
+
+  const recategorise = async (item, categoryId) => {
+    setRecatItem(null)
+    // The server also writes the choice back to ingredient_lookup so it
+    // sticks for future saves (spec §3.6.4).
+    const updated = await api(`/api/shopping/${item.id}`, {
+      method: 'PATCH',
+      body: { set_category: true, category_id: categoryId },
+    })
+    setItems((list) => list.map((i) => (i.id === item.id ? updated : i)))
   }
 
   const clear = async (checkedOnly) => {
@@ -337,17 +367,40 @@ export default function ShoppingListPage() {
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-4)', paddingTop: 'var(--spacing-1)' }}>
               {orderedSections.map((id) => (
-                <CategorySection key={id} label={categoryName[id]} items={byCategory.get(id)} onToggle={toggleItem} onRemove={removeItem} />
+                <CategorySection key={id} label={categoryName[id]} items={byCategory.get(id)} onToggle={toggleItem} onRemove={removeItem} onRecategorise={setRecatItem} />
               ))}
               {uncategorised.length > 0 && (
-                <CategorySection label="Uncategorised" items={uncategorised} onToggle={toggleItem} onRemove={removeItem} />
+                <CategorySection label="Uncategorised" items={uncategorised} onToggle={toggleItem} onRemove={removeItem} onRecategorise={setRecatItem} />
               )}
               {completed.length > 0 && (
-                <CategorySection label="Completed" items={[...completed].sort(byName)} onToggle={toggleItem} onRemove={removeItem} />
+                <CategorySection label="Completed" items={[...completed].sort(byName)} onToggle={toggleItem} onRemove={removeItem} onRecategorise={setRecatItem} />
               )}
             </div>
           )}
         </div>
+
+        {/* Recategorise dialog: one tap moves the item and teaches the
+            lookup table, so the AI/autocomplete gets it right next time. */}
+        <Dialog isOpen={recatItem !== null} onOpenChange={(open) => { if (!open) setRecatItem(null) }} purpose="form">
+          {recatItem && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-3)', padding: 'var(--spacing-2)' }}>
+              <h2 style={{ margin: 0, fontSize: 'var(--text-heading-2-size)', fontWeight: 'var(--text-heading-2-weight)', color: 'var(--color-text-primary)' }}>
+                Category for “{recatItem.name}”
+              </h2>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-1)', maxHeight: '50vh', overflowY: 'auto' }}>
+                {categories.map((c) => (
+                  <Button
+                    key={c.id}
+                    label={c.name}
+                    variant={recatItem.category_id === c.id ? 'secondary' : 'ghost'}
+                    clickAction={() => recategorise(recatItem, c.id)}
+                  />
+                ))}
+              </div>
+              <Button label="Cancel" variant="ghost" onClick={() => setRecatItem(null)} />
+            </div>
+          )}
+        </Dialog>
 
         {/* Footer actions */}
         {items.length > 0 && (
