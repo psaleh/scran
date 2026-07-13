@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import { Badge } from '@astryxdesign/core/Badge'
 import { Button } from '@astryxdesign/core/Button'
 import { Card } from '@astryxdesign/core/Card'
@@ -113,18 +113,25 @@ export default function RecipeEditorPage() {
   const { id } = useParams() // undefined on /recipes/new
   const navigate = useNavigate()
   const isDesktop = useIsDesktop()
+  // Website import (spec §3.3.2) lands here with the parsed recipe in router
+  // state; the form starts pre-filled and the user reviews before saving.
+  const prefill = useLocation().state?.prefill
 
   const [loaded, setLoaded] = useState(id === undefined)
   const [error, setError] = useState('')
-  const [title, setTitle] = useState('')
-  const [description, setDescription] = useState('')
-  const [servings, setServings] = useState(4)
-  const [tags, setTags] = useState([])
+  const [title, setTitle] = useState(prefill?.title ?? '')
+  const [description, setDescription] = useState(prefill?.description ?? '')
+  const [servings, setServings] = useState(prefill?.servings ?? 4)
+  const [tags, setTags] = useState(prefill?.tags ?? [])
   const [tagDraft, setTagDraft] = useState('')
-  const [sourceUrl, setSourceUrl] = useState(null)
+  const [sourceUrl, setSourceUrl] = useState(prefill?.source_url ?? null)
   const [status, setStatus] = useState('draft')
-  const [ingredients, setIngredients] = useState([newIngredient()])
-  const [steps, setSteps] = useState([''])
+  const [ingredients, setIngredients] = useState(() =>
+    prefill?.ingredients?.length
+      ? prefill.ingredients.map((i) => ({ ...newIngredient(), ...i, amount: i.amount == null ? '' : String(i.amount), unit: i.unit ?? '' }))
+      : [newIngredient()],
+  )
+  const [steps, setSteps] = useState(prefill?.steps?.length ? prefill.steps : [''])
   const [photoFile, setPhotoFile] = useState(null)
   const [photoPreview, setPhotoPreview] = useState(null)
   const [existingPhoto, setExistingPhoto] = useState(null)

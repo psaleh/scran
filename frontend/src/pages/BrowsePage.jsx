@@ -3,12 +3,14 @@ import { useNavigate } from 'react-router-dom'
 import { Badge } from '@astryxdesign/core/Badge'
 import { Button } from '@astryxdesign/core/Button'
 import { Card } from '@astryxdesign/core/Card'
+import { DropdownMenu } from '@astryxdesign/core/DropdownMenu'
 import { EmptyState } from '@astryxdesign/core/EmptyState'
 import { Spinner } from '@astryxdesign/core/Spinner'
 import { TextInput } from '@astryxdesign/core/TextInput'
 import { ToggleButton } from '@astryxdesign/core/ToggleButton'
 
 import { api } from '../api.js'
+import ImportUrlDialog from '../components/ImportUrlDialog.jsx'
 import TagBadge from '../components/TagBadge.jsx'
 import { useIsDesktop } from '../useIsDesktop.js'
 
@@ -81,6 +83,7 @@ export default function BrowsePage() {
   const [allTags, setAllTags] = useState([])
   const [recipes, setRecipes] = useState(null) // null = loading
   const [error, setError] = useState('')
+  const [importOpen, setImportOpen] = useState(false)
   const isDesktop = useIsDesktop()
   const navigate = useNavigate()
 
@@ -100,6 +103,13 @@ export default function BrowsePage() {
     }, 250)
     return () => clearTimeout(timer)
   }, [query, activeTag])
+
+  // "Add recipe" menu (spec §6.2): manual entry or website import. Photo
+  // import joins this menu once the AI import inbox is built.
+  const addMenuItems = [
+    { label: 'Manual entry', onClick: () => navigate('/recipes/new') },
+    { label: 'Import from website…', onClick: () => setImportOpen(true) },
+  ]
 
   const isFreshInstall =
     recipes !== null && recipes.length === 0 && !query.trim() && !activeTag
@@ -124,7 +134,7 @@ export default function BrowsePage() {
             Recipes
           </h1>
           {!isDesktop && (
-            <Button label="Add recipe" variant="primary" size="sm" onClick={() => navigate('/recipes/new')} />
+            <DropdownMenu button={{ label: 'Add recipe', variant: 'primary', size: 'sm' }} items={addMenuItems} menuWidth={200} />
           )}
         </div>
 
@@ -153,9 +163,11 @@ export default function BrowsePage() {
         )}
 
         {isDesktop && (
-          <Button label="Add recipe" variant="primary" onClick={() => navigate('/recipes/new')} />
+          <DropdownMenu button={{ label: 'Add recipe', variant: 'primary' }} items={addMenuItems} menuWidth={200} />
         )}
       </div>
+
+      <ImportUrlDialog isOpen={importOpen} onOpenChange={setImportOpen} />
 
       {/* Grid */}
       <div style={{ flex: 1, overflowY: 'auto', padding: isDesktop ? 'var(--spacing-6)' : 'var(--spacing-4)' }}>

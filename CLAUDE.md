@@ -8,9 +8,10 @@ before building a feature, and respect §8 "Settled decisions (do not relitigate
 search, cooking notes, photo upload, recipe versions ("save as version",
 migration 002), shopping list (copy-from-recipe, store-ordered grouping),
 stores/categories, and the Settings screens (AI profiles, stores route
-editor, categories, users, auth info). **Remaining**: website URL import, AI
-job queue worker + import inbox (jobs already queue as `pending`), PWA
-service worker.
+editor, categories, users, auth info), and website URL import
+(`backend/app/importer.py`, JSON-LD + microdata). **Remaining**: AI job
+queue worker + import inbox (jobs already queue as `pending`), PWA service
+worker.
 
 ## Owner context
 
