@@ -42,6 +42,8 @@ function AiProfilesSection() {
   const [profiles, setProfiles] = useState([])
   const [editing, setEditing] = useState(null) // null | {} (new) | profile
   const [error, setError] = useState('')
+  const [testingId, setTestingId] = useState(null)
+  const [testResults, setTestResults] = useState({}) // profile id → {ok, message}
 
   const load = () => api('/api/ai-profiles').then(setProfiles).catch((e) => setError(e.message))
   useEffect(() => { load() }, [])
@@ -73,6 +75,19 @@ function AiProfilesSection() {
     load()
   }
 
+  const test = async (id) => {
+    setTestingId(id)
+    setTestResults((r) => ({ ...r, [id]: null }))
+    try {
+      const result = await api(`/api/ai-profiles/${id}/test`, { method: 'POST' })
+      setTestResults((r) => ({ ...r, [id]: result }))
+    } catch (e) {
+      setTestResults((r) => ({ ...r, [id]: { ok: false, message: e.message } }))
+    } finally {
+      setTestingId(null)
+    }
+  }
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-3)' }}>
       {error && <Banner status="error" title={error} />}
@@ -97,9 +112,25 @@ function AiProfilesSection() {
                   </span>
                 </div>
                 {!p.is_default && <Button label="Use" size="sm" variant="secondary" clickAction={() => activate(p.id)} />}
+                <Button
+                  label={testingId === p.id ? 'Testing…' : 'Test'}
+                  size="sm"
+                  variant="secondary"
+                  isDisabled={testingId !== null}
+                  clickAction={() => test(p.id)}
+                />
                 <IconButton label="Edit profile" icon={<span>✎</span>} variant="ghost" size="sm" onClick={() => setEditing({ ...p, api_key: '' })} />
                 <IconButton label="Delete profile" icon={<span>×</span>} variant="ghost" size="sm" clickAction={() => remove(p.id)} />
               </div>
+              {testResults[p.id] && (
+                <div style={{ padding: '0 var(--spacing-4) var(--spacing-3)' }}>
+                  <Banner
+                    status={testResults[p.id].ok ? 'success' : 'error'}
+                    title={testResults[p.id].ok ? 'Connection OK' : 'Connection failed'}
+                    description={testResults[p.id].message}
+                  />
+                </div>
+              )}
             </div>
           ))}
         </Card>

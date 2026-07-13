@@ -10,7 +10,7 @@ import sqlite3
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
-from . import config
+from . import ai, config
 from .auth.deps import get_current_admin, get_current_user
 from .auth.passwords import hash_password
 from .db import get_db
@@ -264,6 +264,24 @@ def activate_profile(
     db.execute("UPDATE ai_profiles SET is_default = 1 WHERE id = ?", (profile_id,))
     db.commit()
     return {"ok": True}
+
+
+@router.post("/ai-profiles/{profile_id}/test")
+def test_profile(
+    profile_id: int,
+    db: sqlite3.Connection = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    """Send a trivial chat request to the profile's endpoint (spec §5.1).
+
+    Always returns 200 with {ok, message} — a failed connection is a normal
+    result the UI displays, not an HTTP error.
+    """
+    row = db.execute("SELECT * FROM ai_profiles WHERE id = ?", (profile_id,)).fetchone()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Profile not found")
+    ok, message = ai.test_profile(row)
+    return {"ok": ok, "message": message}
 
 
 @router.delete("/ai-profiles/{profile_id}")
