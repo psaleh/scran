@@ -316,19 +316,33 @@ RECIPE_JSON_SPEC = """\
 Reply with ONLY a JSON object in exactly this shape:
 {"title": str, "description": str, "servings": int or null,
  "ingredients": [{"amount": number or null, "unit": str or null,
-                  "name": str, "note": str or null}],
- "steps": [str]}
+                  "name": str, "note": str or null, "section": str or null}],
+ "steps": [str], "tags": [str]}
 
 Rules for ingredients: "name" must contain ONLY the bare purchasable item —
 what you'd write on a shopping list. Preparation ("finely diced"), size
 ("small", "large"), and qualifiers ("optional", "divided") go in "note".
-Keep amounts as plain numbers (no fractions like "1/2" — use 0.5)."""
+Keep amounts as plain numbers (no fractions like "1/2" — use 0.5). If the
+recipe groups ingredients under headings (e.g. "For the sauce", "For the
+topping"), put that heading in "section" for every ingredient in that group
+and null for ingredients with no heading — never invent headings that
+aren't in the source.
+
+Rules for tags: keep every tag already on the recipe unless it's flatly
+wrong for the dish. You may add tags the page text clearly supports. Before
+adding or renaming a tag, check it against EXISTING TAGS IN USE below — if
+an equivalent already exists (e.g. "Asian Food" when "Asian" exists,
+"pudding" when "dessert" exists), reuse the existing tag instead of adding a
+near-duplicate."""
 
 REDRAFT_PROMPT = """\
 Here is the readable text of a recipe web page{draft_clause}.
 Extract the recipe, correcting any mistakes in the draft against the page.
 
 {spec}
+
+--- EXISTING TAGS IN USE ---
+{existing_tags}
 
 --- PAGE TEXT ---
 {page_text}
@@ -373,15 +387,24 @@ def _coerce_recipe(data):
             "note": text(raw.get("note")) or None,
             "category_id": None,
             "scalable": True,
+            "section": text(raw.get("section")) or None,
         })
 
     steps = [text(s) for s in data.get("steps") or [] if text(s)]
+
+    tags = []
+    for raw in data.get("tags") or []:
+        t = text(raw)
+        if t and t not in tags:
+            tags.append(t)
+
     return {
         "title": title,
         "description": text(data.get("description")),
         "servings": servings,
         "ingredients": ingredients,
         "steps": steps,
+        "tags": tags,
     }
 
 
@@ -409,8 +432,9 @@ def _url_redraft_job(conn, profile, payload):
             "title": row["title"],
             "description": row["description"],
             "servings": row["servings"],
+            "tags": json.loads(row["tags"] or "[]"),
             "ingredients": [
-                {"amount": r["amount"], "unit": r["unit"], "name": r["name"], "note": r["note"]}
+                {"amount": r["amount"], "unit": r["unit"], "name": r["name"], "note": r["note"], "section": r["section"]}
                 for r in conn.execute(
                     "SELECT * FROM ingredients WHERE recipe_id = ? ORDER BY position",
                     (recipe_id,),
@@ -429,11 +453,19 @@ def _url_redraft_job(conn, profile, payload):
     if not page_text.strip():
         raise ValueError("no stored page text to work from")
 
+    existing_tags = [
+        r["tag"] for r in conn.execute(
+            "SELECT DISTINCT json_each.value AS tag FROM recipes, json_each(recipes.tags)"
+            " ORDER BY tag COLLATE NOCASE"
+        )
+    ]
+
     prompt = REDRAFT_PROMPT.format(
         draft_clause=(
             " and a possibly-flawed structured draft extracted from it" if draft else ""
         ),
         spec=RECIPE_JSON_SPEC,
+        existing_tags=", ".join(existing_tags) if existing_tags else "(none yet)",
         page_text=page_text,
         draft_section=(
             "\n--- CURRENT DRAFT (correct this) ---\n" + json.dumps(draft)
@@ -451,8 +483,10 @@ def _url_redraft_job(conn, profile, payload):
     }
     if recipe_id is None:
         # Fallback extraction creates a brand-new draft: carry the page text
-        # into the result so the saved draft can be redrafted later too.
+        # into the result so the saved draft can be redrafted later too, and
+        # any photo candidates found on the page (issue #2).
         result["page_text"] = page_text
+        result["image_urls"] = payload.get("image_urls") or []
     return result
 
 

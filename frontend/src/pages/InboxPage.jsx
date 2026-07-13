@@ -36,7 +36,9 @@ const STATUS_META = {
 const REVIEW_TYPES = new Set(['photo_import', 'url_redraft'])
 
 function JobCard({ job, onRetry, onReview }) {
-  const needsReview = job.status === 'done' && REVIEW_TYPES.has(job.type)
+  // Once the linked recipe is published, the review is done — stop
+  // offering "Review draft" and show Done like any other finished job.
+  const needsReview = job.status === 'done' && REVIEW_TYPES.has(job.type) && job.recipe_status !== 'published'
   const meta = needsReview ? { label: 'Needs review', variant: 'info' } : STATUS_META[job.status]
   return (
     <Card elevation="low" style={{ display: 'flex', gap: 'var(--spacing-3)' }}>
@@ -131,8 +133,22 @@ export default function InboxPage() {
   // an existing recipe open that recipe with the AI's draft pre-filled (the
   // user still has to save); fallback extractions open a brand-new draft.
   const review = (job) => {
-    const { recipe, recipe_id: recipeId, url, page_text: pageText } = job.result
-    const prefill = { ...recipe, source_url: url, source_page_text: pageText }
+    const { recipe, url, page_text: pageText, image_urls: imageUrls } = job.result
+    // job.recipe_id is the durable link (set at enqueue time for a redraft
+    // of an existing recipe, or once a fallback extraction gets saved for
+    // the first time) — prefer it over job.result.recipe_id so re-opening
+    // "Review draft" after an earlier draft save reopens that recipe
+    // instead of creating a duplicate.
+    const recipeId = job.recipe_id ?? job.result.recipe_id
+    const prefill = {
+      ...recipe,
+      source_url: url,
+      source_page_text: pageText,
+      ai_reviewed: true,
+      image_urls: imageUrls,
+      // Only needed for a fallback extraction not yet linked to a recipe.
+      review_job_id: recipeId ? null : job.id,
+    }
     navigate(recipeId ? `/recipes/${recipeId}/edit` : '/recipes/new', { state: { prefill } })
   }
 

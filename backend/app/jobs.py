@@ -16,7 +16,7 @@ from .db import get_db
 router = APIRouter(prefix="/api", tags=["jobs"])
 
 
-def _job(row: sqlite3.Row) -> dict:
+def _job(row: sqlite3.Row, recipe_status: str | None = None) -> dict:
     """Shape a jobs row for the UI. Payloads can be big (page text, photos),
     so expose a small type-specific summary instead of the raw payload."""
     payload = json.loads(row["payload"] or "{}")
@@ -42,6 +42,11 @@ def _job(row: sqlite3.Row) -> dict:
         "attempts": row["attempts"],
         "created_at": row["created_at"],
         "updated_at": row["updated_at"],
+        # The recipe this job produced/updated, and its current status —
+        # lets the inbox show a review job as Done once that recipe is
+        # actually published, instead of "needs review" forever.
+        "recipe_id": row["recipe_id"],
+        "recipe_status": recipe_status,
     }
 
 
@@ -50,8 +55,12 @@ def list_jobs(
     db: sqlite3.Connection = Depends(get_db),
     user=Depends(get_current_user),
 ):
-    rows = db.execute("SELECT * FROM jobs ORDER BY id DESC LIMIT 100").fetchall()
-    return [_job(r) for r in rows]
+    rows = db.execute(
+        "SELECT jobs.*, recipes.status AS recipe_status FROM jobs"
+        " LEFT JOIN recipes ON recipes.id = jobs.recipe_id"
+        " ORDER BY jobs.id DESC LIMIT 100"
+    ).fetchall()
+    return [_job(r, recipe_status=r["recipe_status"]) for r in rows]
 
 
 @router.post("/jobs/{job_id}/retry")

@@ -19,7 +19,7 @@ import { sectionLabelStyle, stepNumberStyle } from '../styles.js'
 import { useIsDesktop } from '../useIsDesktop.js'
 
 let nextRowId = 1
-const newIngredient = () => ({ rowId: nextRowId++, amount: '', unit: '', name: '', note: '', category_id: null, scalable: true })
+const newIngredient = () => ({ rowId: nextRowId++, amount: '', unit: '', name: '', note: '', category_id: null, scalable: true, section: '' })
 
 /**
  * Ingredient row with autocomplete against the lookup table (spec §3.2).
@@ -99,6 +99,18 @@ function IngredientRow({ ing, categories, onChange, onRemove }) {
             placeholder="Note, e.g. finely diced (optional)"
           />
         </div>
+        {/* Sets a group heading starting at this row — every ingredient below
+            it inherits the heading until the next one sets a new one
+            (issue #1: real recipes group ingredients, e.g. "For the sauce"). */}
+        <div style={{ flex: '1 1 180px', minWidth: 0 }}>
+          <TextInput
+            label="Section heading"
+            isLabelHidden
+            value={ing.section}
+            onChange={(v) => onChange({ ...ing, section: v })}
+            placeholder="Section heading, e.g. For the sauce (optional)"
+          />
+        </div>
         {/* Manual category override (spec §3.6.4). Empty = let the lookup
             table / AI categorisation decide on save. */}
         <div style={{ flex: '1 1 140px', minWidth: 0 }}>
@@ -154,19 +166,28 @@ export default function RecipeEditorPage() {
   const [status, setStatus] = useState('draft')
   const [ingredients, setIngredients] = useState(() =>
     prefill?.ingredients?.length
-      ? prefill.ingredients.map((i) => ({ ...newIngredient(), ...i, amount: i.amount == null ? '' : String(i.amount), unit: i.unit ?? '', note: i.note ?? '' }))
+      ? prefill.ingredients.map((i) => ({ ...newIngredient(), ...i, amount: i.amount == null ? '' : String(i.amount), unit: i.unit ?? '', note: i.note ?? '', section: i.section ?? '' }))
       : [newIngredient()],
   )
   const [steps, setSteps] = useState(prefill?.steps?.length ? prefill.steps : [''])
   const [photoFile, setPhotoFile] = useState(null)
   const [photoPreview, setPhotoPreview] = useState(null)
   const [existingPhoto, setExistingPhoto] = useState(null)
+  // Photos found on the source page (spec issue #2) — the user picks one to
+  // keep; the rest are simply never downloaded. A local upload always wins
+  // over a picked candidate.
+  const [imageChoices] = useState(prefill?.image_urls ?? [])
+  const [chosenImageUrl, setChosenImageUrl] = useState(null)
   const [versionDialogOpen, setVersionDialogOpen] = useState(false)
   const [versionLabel, setVersionLabel] = useState('')
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
+  const [deleteBusy, setDeleteBusy] = useState(false)
   const [categories, setCategories] = useState([])
   // True when the server holds page text for this recipe (URL imports) —
   // enables the "Tidy up with AI" redraft action (spec §5.5).
-  const [hasPageText, setHasPageText] = useState(false)
+  // A fresh website import already carries page text in the prefill, so the
+  // button should appear immediately — not only after a save + reload.
+  const [hasPageText, setHasPageText] = useState(Boolean(prefill?.source_page_text))
   const [tidyBusy, setTidyBusy] = useState(false)
   const fileInput = useRef(null)
 
@@ -189,7 +210,7 @@ export default function RecipeEditorPage() {
           setSourceUrl(r.source_url)
           setIngredients(
             r.ingredients.length
-              ? r.ingredients.map((i) => ({ ...newIngredient(), ...i, amount: i.amount == null ? '' : String(i.amount), unit: i.unit ?? '', note: i.note ?? '' }))
+              ? r.ingredients.map((i) => ({ ...newIngredient(), ...i, amount: i.amount == null ? '' : String(i.amount), unit: i.unit ?? '', note: i.note ?? '', section: i.section ?? '' }))
               : [newIngredient()],
           )
           setSteps(r.steps.length ? r.steps : [''])
@@ -222,8 +243,15 @@ export default function RecipeEditorPage() {
   const choosePhoto = (e) => {
     const file = e.target.files?.[0]
     if (!file) return
+    setChosenImageUrl(null) // a local upload replaces any picked candidate
     setPhotoFile(file)
     setPhotoPreview(URL.createObjectURL(file))
+  }
+
+  const pickImageChoice = (url) => {
+    setPhotoFile(null)
+    setPhotoPreview(null)
+    setChosenImageUrl((current) => (current === url ? null : url))
   }
 
   const buildBody = (saveStatus) => {
@@ -237,20 +265,39 @@ export default function RecipeEditorPage() {
       servings,
       tags: finalTags,
       source_url: sourceUrl,
+      photo_url: chosenImageUrl,
       // Page text rides along from URL/AI imports so the saved draft can be
       // redrafted later; null on ordinary saves means "keep what's stored".
       source_page_text: prefill?.source_page_text ?? null,
       status: saveStatus,
-      ingredients: ingredients
-        .filter((i) => i.name.trim())
-        .map((i) => ({
-          amount: i.amount === '' ? null : Number(i.amount) || null,
-          unit: i.unit || null,
-          name: i.name,
-          note: i.note.trim() || null,
-          category_id: i.category_id,
-          scalable: i.scalable,
-        })),
+      // Only true for the one save that follows opening an AI-reviewed draft
+      // (url_redraft/photo_import) — logs "Reviewed by AI" once, not on
+      // every subsequent ordinary edit.
+      ai_reviewed: Boolean(prefill?.ai_reviewed),
+      // Links a fallback-extraction job to the recipe it just created, so
+      // the import inbox can show it as Done once this recipe is published.
+      review_job_id: prefill?.review_job_id ?? null,
+      ingredients: (() => {
+        // Carry each row's effective section (its own heading, or whichever
+        // heading came before it) so blank in-between rows still record
+        // which group they belong to.
+        let currentSection = null
+        return ingredients
+          .filter((i) => i.name.trim())
+          .map((i) => {
+            const trimmed = i.section.trim()
+            if (trimmed) currentSection = trimmed
+            return {
+              amount: i.amount === '' ? null : Number(i.amount) || null,
+              unit: i.unit || null,
+              name: i.name,
+              note: i.note.trim() || null,
+              category_id: i.category_id,
+              scalable: i.scalable,
+              section: currentSection,
+            }
+          })
+      })(),
       steps: steps.filter((s) => s.trim()),
     }
   }
@@ -287,16 +334,36 @@ export default function RecipeEditorPage() {
   // "Tidy up with AI" (spec §5.5): save the current draft, then queue a
   // redraft job. The worker reads the saved state, so edits made here are
   // what the AI corrects. The result appears in the import inbox for review.
+  // On a brand-new import (id undefined) this creates the recipe first —
+  // the button is available on the very first review, before any manual save.
   const tidyWithAi = async () => {
     if (!validate() || tidyBusy) return
     setTidyBusy(true)
     try {
-      await api(`/api/recipes/${id}`, { method: 'PUT', body: buildBody(status) })
-      await api(`/api/recipes/${id}/redraft`, { method: 'POST' })
+      let targetId = id
+      if (targetId === undefined) {
+        const created = await api('/api/recipes', { method: 'POST', body: buildBody(status) })
+        targetId = created.id
+      } else {
+        await api(`/api/recipes/${targetId}`, { method: 'PUT', body: buildBody(status) })
+      }
+      await api(`/api/recipes/${targetId}/redraft`, { method: 'POST' })
       navigate('/inbox')
     } catch (err) {
       setError(err.message)
       setTidyBusy(false)
+    }
+  }
+
+  const deleteRecipe = async () => {
+    setDeleteBusy(true)
+    try {
+      await api(`/api/recipes/${id}`, { method: 'DELETE' })
+      navigate('/')
+    } catch (err) {
+      setDeleteDialogOpen(false)
+      setDeleteBusy(false)
+      setError(err.message)
     }
   }
 
@@ -323,7 +390,7 @@ export default function RecipeEditorPage() {
     )
   }
 
-  const photoSrc = photoPreview || (existingPhoto ? `/api/uploads/${existingPhoto}` : null)
+  const photoSrc = photoPreview || chosenImageUrl || (existingPhoto ? `/api/uploads/${existingPhoto}` : null)
 
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
@@ -342,6 +409,9 @@ export default function RecipeEditorPage() {
       >
         <IconButton label="Back" icon={<span>‹</span>} variant="ghost" onClick={() => navigate(-1)} />
         <div style={{ display: 'flex', gap: 'var(--spacing-2)' }}>
+          {id !== undefined && (
+            <Button label="Delete…" variant="destructive" size="sm" onClick={() => setDeleteDialogOpen(true)} />
+          )}
           {id !== undefined && (
             <Button label="Save as version…" variant="ghost" size="sm" onClick={() => setVersionDialogOpen(true)} />
           )}
@@ -375,6 +445,24 @@ export default function RecipeEditorPage() {
         </div>
       </Dialog>
 
+      {/* Delete confirmation: irreversible, so require an explicit confirm click */}
+      <Dialog isOpen={deleteDialogOpen} onOpenChange={setDeleteDialogOpen} purpose="confirmation">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-4)', padding: 'var(--spacing-2)' }}>
+          <div>
+            <h2 style={{ margin: 0, fontSize: 'var(--text-heading-2-size)', fontWeight: 'var(--text-heading-2-weight)', color: 'var(--color-text-primary)' }}>
+              Delete this recipe?
+            </h2>
+            <p style={{ margin: 'var(--spacing-1) 0 0', fontSize: 'var(--font-size-base)', color: 'var(--color-text-secondary)' }}>
+              This removes the recipe, its photo, and its shopping list history. This can't be undone.
+            </p>
+          </div>
+          <div style={{ display: 'flex', gap: 'var(--spacing-2)', justifyContent: 'flex-end' }}>
+            <Button label="Cancel" variant="ghost" onClick={() => setDeleteDialogOpen(false)} isDisabled={deleteBusy} />
+            <Button label="Delete recipe" variant="destructive" clickAction={deleteRecipe} isLoading={deleteBusy} />
+          </div>
+        </div>
+      </Dialog>
+
       <div style={{ flex: 1, overflowY: 'auto' }}>
         <div style={{ maxWidth: isDesktop ? 1200 : 'none', margin: '0 auto', padding: isDesktop ? 'var(--spacing-6)' : 0 }}>
           <div style={{ padding: isDesktop ? '0 0 var(--spacing-4)' : 'var(--spacing-4)', display: 'flex', flexDirection: 'column', gap: 'var(--spacing-4)' }}>
@@ -382,7 +470,7 @@ export default function RecipeEditorPage() {
             {sourceUrl && (
               <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--spacing-2)', flexWrap: 'wrap' }}>
                 <Badge label={`Imported from ${sourceUrl}`} variant="info" />
-                {id !== undefined && hasPageText && (
+                {hasPageText && (
                   <Button
                     label={tidyBusy ? 'Queueing…' : 'Tidy up with AI'}
                     variant="secondary"
@@ -418,6 +506,36 @@ export default function RecipeEditorPage() {
                 </span>
               )}
             </div>
+
+            {/* Photos found on the source page (spec issue #2): tap one to
+                use it, tap again to deselect. Never fetched until saved. */}
+            {imageChoices.length > 0 && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-2)' }}>
+                <span style={{ fontSize: 'var(--text-supporting-size)', color: 'var(--color-text-secondary)' }}>
+                  Photos found on the source page — tap one to use it
+                </span>
+                <div style={{ display: 'flex', gap: 'var(--spacing-2)', overflowX: 'auto' }}>
+                  {imageChoices.map((url) => (
+                    <img
+                      key={url}
+                      src={url}
+                      alt=""
+                      onClick={() => pickImageChoice(url)}
+                      style={{
+                        width: 72,
+                        height: 72,
+                        flexShrink: 0,
+                        objectFit: 'cover',
+                        borderRadius: 'var(--radius-inner)',
+                        cursor: 'pointer',
+                        outline: chosenImageUrl === url ? '3px solid var(--color-accent)' : '1px solid var(--color-border)',
+                        outlineOffset: -1,
+                      }}
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
 
             <div style={{ display: 'grid', gridTemplateColumns: isDesktop ? '2fr 1fr' : '1fr', gap: 'var(--spacing-4)' }}>
               <TextInput label="Title" value={title} onChange={setTitle} placeholder="Recipe title" isRequired />
@@ -456,12 +574,36 @@ export default function RecipeEditorPage() {
                 <Button label="Add ingredient" variant="secondary" size="sm" onClick={() => setIngredients([...ingredients, newIngredient()])} />
               </div>
               <Card padding={0} style={{ margin: isDesktop ? 0 : '0 var(--spacing-4)' }}>
-                {ingredients.map((ing, i) => (
-                  <div key={ing.rowId}>
-                    {i > 0 && <Divider />}
-                    <IngredientRow ing={ing} categories={categories} onChange={(next) => updateIngredient(ing.rowId, next)} onRemove={() => removeIngredient(ing.rowId)} />
-                  </div>
-                ))}
+                {(() => {
+                  // A row's section text starts a new heading; blank rows
+                  // stay grouped under whichever heading came before them.
+                  let currentSection = null
+                  return ingredients.map((ing, i) => {
+                    const trimmed = ing.section.trim()
+                    const startsNewSection = trimmed && trimmed !== currentSection
+                    if (trimmed) currentSection = trimmed
+                    return (
+                      <div key={ing.rowId}>
+                        {i > 0 && <Divider />}
+                        {startsNewSection && (
+                          <div
+                            style={{
+                              padding: 'var(--spacing-3) var(--spacing-4) 0',
+                              fontSize: 'var(--text-supporting-size)',
+                              fontWeight: 'var(--font-weight-semibold)',
+                              color: 'var(--color-text-secondary)',
+                              textTransform: 'uppercase',
+                              letterSpacing: '0.02em',
+                            }}
+                          >
+                            {trimmed}
+                          </div>
+                        )}
+                        <IngredientRow ing={ing} categories={categories} onChange={(next) => updateIngredient(ing.rowId, next)} onRemove={() => removeIngredient(ing.rowId)} />
+                      </div>
+                    )
+                  })
+                })()}
               </Card>
             </div>
 

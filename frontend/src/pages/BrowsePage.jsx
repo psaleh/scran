@@ -189,7 +189,7 @@ export default function BrowsePage() {
             <EmptyState title="No recipes found" description="Try a different search or clear the tag filter." />
           )}
           {!error && recipes !== null && recipes.length > 0 && (
-            <div style={{ display: 'grid', gridTemplateColumns: isDesktop ? 'repeat(4, 1fr)' : '1fr 1fr', gap: 'var(--spacing-3)' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: isDesktop ? 'repeat(4, 1fr)' : '1fr', gap: 'var(--spacing-3)' }}>
               {recipes.map((r) => (
                 <RecipeCard key={r.id} recipe={r} onOpen={(id) => navigate(`/recipes/${id}`)} />
               ))}

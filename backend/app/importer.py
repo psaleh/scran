@@ -11,12 +11,15 @@ dependency count low, per the project conventions.
 """
 
 import json
+import mimetypes
 import re
 import sqlite3
 import urllib.error
+import urllib.parse
 import urllib.request
 from html import unescape
 from html.parser import HTMLParser
+from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
@@ -30,6 +33,8 @@ router = APIRouter(prefix="/api", tags=["import"])
 
 FETCH_TIMEOUT_SECONDS = 15
 MAX_PAGE_BYTES = 5 * 1024 * 1024  # recipe pages are text; 5 MB is generous
+MAX_IMAGE_BYTES = 8 * 1024 * 1024
+ALLOWED_IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
 # Cap on stored page text (spec §5.5: truncate to a sane length for
 # local-model context limits). ~30k chars ≈ 8k tokens.
 MAX_PAGE_TEXT_CHARS = 30_000
@@ -106,6 +111,66 @@ def _page_text(html: str) -> str:
     cleaned = [" ".join(line.split()) for line in lines]
     text = "\n".join(line for line in cleaned if line)
     return text[:MAX_PAGE_TEXT_CHARS]
+
+
+def _image_urls(node: dict | None, html: str) -> list[str]:
+    """Candidate photos for a scraped recipe (issue #2): schema.org "image"
+    first (string, list, or ImageObject-with-url — schema.org allows all
+    three), then <meta property="og:image"> as a fallback/supplement so
+    sites without a fully-tagged Recipe node still offer something. The
+    user picks one in the editor; nothing is downloaded until they do, so
+    the rest are simply never fetched (no cleanup needed)."""
+    urls: list[str] = []
+
+    def add(value):
+        if isinstance(value, dict):
+            add(value.get("url") or value.get("@id"))
+        elif isinstance(value, list):
+            for v in value:
+                add(v)
+        elif isinstance(value, str) and value.strip():
+            urls.append(value.strip())
+
+    if node:
+        add(node.get("image"))
+    for m in re.finditer(
+        r'<meta[^>]+property=["\']og:image["\'][^>]+content=["\']([^"\']+)["\']',
+        html, re.IGNORECASE,
+    ):
+        urls.append(unescape(m.group(1)))
+
+    seen: set[str] = set()
+    deduped = []
+    for u in urls:
+        if u not in seen:
+            seen.add(u)
+            deduped.append(u)
+    return deduped[:6]
+
+
+def fetch_image(url: str) -> tuple[bytes, str]:
+    """Download a chosen candidate image. Used at save time, not import
+    time — only the one the user picks is ever fetched (spec issue #2)."""
+    if not re.match(r"^https?://", url, re.IGNORECASE):
+        raise HTTPException(status_code=400, detail="Invalid image URL")
+    request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+    try:
+        with urllib.request.urlopen(request, timeout=FETCH_TIMEOUT_SECONDS) as response:
+            data = response.read(MAX_IMAGE_BYTES)
+            content_type = response.headers.get_content_type()
+    except urllib.error.HTTPError as exc:
+        raise HTTPException(status_code=502, detail=f"Couldn't download that image (HTTP {exc.code})")
+    except (urllib.error.URLError, TimeoutError):
+        raise HTTPException(status_code=502, detail="Couldn't download that image")
+
+    ext = mimetypes.guess_extension(content_type or "") or ""
+    if ext == ".jpe":
+        ext = ".jpg"
+    if ext not in ALLOWED_IMAGE_EXTS:
+        ext = Path(urllib.parse.urlparse(url).path).suffix.lower()
+    if ext not in ALLOWED_IMAGE_EXTS:
+        raise HTTPException(status_code=400, detail="That doesn't look like a supported image type")
+    return data, ext
 
 
 # --- JSON-LD extraction --------------------------------------------------------
@@ -398,7 +463,7 @@ def _split_name_note(text: str) -> tuple[str, str | None]:
     return name, ", ".join(notes) or None
 
 
-def _parse_ingredient(text: str) -> dict:
+def _parse_ingredient(text: str, section: str | None) -> dict:
     """Split "2 tbsp olive oil" into amount/unit/name/note. Best-effort —
     whatever doesn't parse cleanly just stays in the name for the user to
     tidy in the editor (this is a review flow, not a data pipeline)."""
@@ -425,14 +490,44 @@ def _parse_ingredient(text: str) -> dict:
         "note": note,
         "category_id": None,
         "scalable": True,
+        "section": section,
     }
+
+
+# Some sites flatten ingredient section headings ("For the sauce:") into the
+# same recipeIngredient array as the ingredients themselves (issue #1).
+# Headings never carry a leading quantity and are conventionally short and
+# colon- or label-terminated, unlike a real ingredient line.
+_SECTION_HEADING_RE = re.compile(
+    r"^(?:for\s+the\s+.+|.+:)$", re.IGNORECASE
+)
+
+
+def _is_section_heading(text: str) -> bool:
+    text = text.strip()
+    if not text or len(text) > 60:
+        return False
+    if _parse_amount(text)[0] is not None:
+        return False
+    return bool(_SECTION_HEADING_RE.match(text))
 
 
 def _parse_ingredients(node: dict) -> list[dict]:
     raw = node.get("recipeIngredient") or node.get("ingredients") or []
     if isinstance(raw, str):
         raw = [raw]
-    return [_parse_ingredient(_as_text(i)) for i in raw if _as_text(i)]
+    section = None
+    out = []
+    for i in raw:
+        text = _as_text(i)
+        if not text:
+            continue
+        text = " ".join(unescape(text).split())
+        if _is_section_heading(text):
+            section = text.rstrip(":").strip()
+            continue
+        out.append(_parse_ingredient(text, section))
+    return out
 
 
 # --- Endpoint ------------------------------------------------------------------
@@ -472,6 +567,7 @@ def import_from_url(body: ImportRequest, user=Depends(get_current_user)):
         "source_page_text": _page_text(html),
         "ingredients": _parse_ingredients(node),
         "steps": _parse_steps(node.get("recipeInstructions")),
+        "image_urls": _image_urls(node, html),
     }
 
 
@@ -485,12 +581,13 @@ def import_from_url_ai(
     §5.5): fetch the page, strip it to readable text, and queue a url_redraft
     job with no draft. The result lands in the import inbox for review."""
     url = body.url.strip()
-    text = _page_text(_fetch_html(url))
+    html = _fetch_html(url)
+    text = _page_text(html)
     if not text.strip():
         raise HTTPException(status_code=422, detail="That page has no readable text to extract from")
     cur = db.execute(
         "INSERT INTO jobs (type, payload) VALUES ('url_redraft', ?)",
-        (json.dumps({"url": url, "page_text": text}),),
+        (json.dumps({"url": url, "page_text": text, "image_urls": _image_urls(None, html)}),),
     )
     db.commit()
     worker.wake()

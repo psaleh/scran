@@ -18,7 +18,7 @@ import { useIsDesktop } from './useIsDesktop.js'
 function Shell({ user }) {
   const isDesktop = useIsDesktop()
   return (
-    <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', minHeight: 0, background: 'var(--color-background-body)' }}>
+    <div style={{ height: '100dvh', display: 'flex', flexDirection: 'column', minHeight: 0, background: 'var(--color-background-body)' }}>
       {isDesktop && <AppNav />}
       <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
         <Routes>

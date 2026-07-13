@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field
 from . import config, worker
 from .auth.deps import get_current_user
 from .db import get_db
+from .importer import fetch_image
 from .ingredients import enqueue_categorise_job, resolve_category
 from .jobs import _job
 
@@ -32,6 +33,9 @@ class IngredientIn(BaseModel):
     note: str | None = None
     category_id: int | None = None
     scalable: bool = True
+    # Optional group heading ("For the sauce") shown above this ingredient
+    # and any that follow it until the next section (spec issue #1).
+    section: str | None = None
 
 
 class RecipeIn(BaseModel):
@@ -46,6 +50,20 @@ class RecipeIn(BaseModel):
     status: str = Field(default="draft", pattern="^(draft|published)$")
     ingredients: list[IngredientIn] = []
     steps: list[str] = []
+    # Set by the editor when this save comes straight from an AI-drafted
+    # review (url_redraft/photo_import) — adds a "Reviewed by AI" note
+    # (spec issue: notes should log provenance automatically).
+    ai_reviewed: bool = False
+    # One of the scraped candidate photos the user picked in the editor
+    # (spec issue #2) — downloaded server-side on save; a manually uploaded
+    # photo (POST .../photo) always takes precedence over this.
+    photo_url: str | None = None
+    # Id of the url_redraft/photo_import job this draft came from, when that
+    # job didn't already know its recipe at enqueue time (a fallback
+    # extraction creates a brand-new recipe rather than updating one).
+    # Links the job to this recipe so the inbox can show it as Done once
+    # the recipe is published, instead of "needs review" forever.
+    review_job_id: int | None = None
 
 
 class NoteIn(BaseModel):
@@ -59,6 +77,28 @@ class VersionIn(RecipeIn):
 
 
 # --- Helpers -----------------------------------------------------------------
+
+def _apply_photo_url(db: sqlite3.Connection, recipe_id: int, photo_url: str, old_photo_path: str | None) -> None:
+    """Download a chosen scraped photo (spec issue #2) and store it exactly
+    like a manual upload — same directory, same replace-on-change behaviour."""
+    data, ext = fetch_image(photo_url)
+    rel = f"recipes/{recipe_id}_{uuid.uuid4().hex[:8]}{ext}"
+    dest = Path(config.UPLOADS_PATH) / rel
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dest.write_bytes(data)
+    if old_photo_path:
+        (Path(config.UPLOADS_PATH) / old_photo_path).unlink(missing_ok=True)
+    db.execute("UPDATE recipes SET photo_path = ? WHERE id = ?", (rel, recipe_id))
+
+
+def _add_system_note(db: sqlite3.Connection, recipe_id: int, user_id: int, text: str) -> None:
+    """Auto-logged provenance note (import source / AI review) — same table
+    as manual cooking notes, just written by the server instead of the UI."""
+    db.execute(
+        "INSERT INTO recipe_notes (recipe_id, user_id, text) VALUES (?, ?, ?)",
+        (recipe_id, user_id, text),
+    )
+
 
 def _fts_match(q: str) -> str | None:
     """Build a safe FTS5 MATCH expression: each word becomes a quoted prefix
@@ -117,10 +157,11 @@ def _save_children(db: sqlite3.Connection, recipe_id: int, body: RecipeIn) -> No
             needs_ai.append(ing.name)
         db.execute(
             "INSERT INTO ingredients"
-            " (recipe_id, position, amount, unit, name, note, category_id, scalable)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            " (recipe_id, position, amount, unit, name, note, category_id, scalable, section)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (recipe_id, pos, ing.amount, ing.unit, ing.name.strip(),
-             (ing.note or "").strip() or None, category_id, int(ing.scalable)),
+             (ing.note or "").strip() or None, category_id, int(ing.scalable),
+             (ing.section or "").strip() or None),
         )
     for pos, text in enumerate(body.steps):
         if not text.strip():
@@ -202,6 +243,7 @@ def get_recipe(
             "note": r["note"],
             "category_id": r["category_id"],
             "scalable": bool(r["scalable"]),
+            "section": r["section"],
         }
         for r in db.execute(
             "SELECT * FROM ingredients WHERE recipe_id = ? ORDER BY position",
@@ -278,6 +320,14 @@ def create_recipe(
         "UPDATE recipes SET version_group = ? WHERE id = ?", (recipe_id, recipe_id)
     )
     _save_children(db, recipe_id, body)
+    if body.photo_url:
+        _apply_photo_url(db, recipe_id, body.photo_url, old_photo_path=None)
+    if body.source_url:
+        _add_system_note(db, recipe_id, user["id"], f"Imported from {body.source_url}")
+    if body.ai_reviewed:
+        _add_system_note(db, recipe_id, user["id"], "Reviewed and tidied up by AI")
+    if body.review_job_id is not None:
+        db.execute("UPDATE jobs SET recipe_id = ? WHERE id = ?", (recipe_id, body.review_job_id))
     db.commit()
     return get_recipe(recipe_id, db, user)
 
@@ -289,7 +339,7 @@ def update_recipe(
     db: sqlite3.Connection = Depends(get_db),
     user=Depends(get_current_user),
 ):
-    _get_recipe_or_404(db, recipe_id)
+    row = _get_recipe_or_404(db, recipe_id)
     # COALESCE keeps the stored page text when the client doesn't send any —
     # ordinary editor saves must not wipe the redraft source (spec §5.5).
     db.execute(
@@ -301,6 +351,10 @@ def update_recipe(
          body.status, recipe_id),
     )
     _save_children(db, recipe_id, body)
+    if body.photo_url:
+        _apply_photo_url(db, recipe_id, body.photo_url, old_photo_path=row["photo_path"])
+    if body.ai_reviewed:
+        _add_system_note(db, recipe_id, user["id"], "Reviewed and tidied up by AI")
     db.commit()
     return get_recipe(recipe_id, db, user)
 
@@ -375,8 +429,8 @@ def redraft_with_ai(
             detail="This recipe has no stored page text — only URL imports can be tidied with AI",
         )
     cur = db.execute(
-        "INSERT INTO jobs (type, payload) VALUES ('url_redraft', ?)",
-        (json.dumps({"recipe_id": recipe_id, "url": row["source_url"]}),),
+        "INSERT INTO jobs (type, payload, recipe_id) VALUES ('url_redraft', ?, ?)",
+        (json.dumps({"recipe_id": recipe_id, "url": row["source_url"]}), recipe_id),
     )
     db.commit()
     worker.wake()

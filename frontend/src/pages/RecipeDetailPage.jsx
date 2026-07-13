@@ -51,6 +51,24 @@ function IngredientRow({ ingredient, scale, onAdd, added }) {
   )
 }
 
+const URL_PATTERN = /(https?:\/\/[^\s]+)/g
+
+// Auto-added notes (import/AI review) often carry a source link — render it
+// clickable instead of as inert text.
+function renderNoteText(text) {
+  // split() with one capturing group alternates [text, url, text, url, ...]
+  // — odd indices are always the matched URLs.
+  return text.split(URL_PATTERN).map((part, i) =>
+    i % 2 === 1 ? (
+      <a key={i} href={part} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--color-accent)' }}>
+        {part}
+      </a>
+    ) : (
+      <span key={i}>{part}</span>
+    ),
+  )
+}
+
 function NoteRow({ note, currentUser, onChanged }) {
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(note.text)
@@ -90,8 +108,8 @@ function NoteRow({ note, currentUser, onChanged }) {
             {new Date(note.created_at + 'Z').toLocaleString()}
           </span>
         </div>
-        <div style={{ fontSize: 'var(--font-size-lg)', lineHeight: 1.5, color: 'var(--color-text-primary)', marginTop: 2 }}>
-          {note.text}
+        <div style={{ fontSize: 'var(--font-size-lg)', lineHeight: 1.5, color: 'var(--color-text-primary)', marginTop: 2, whiteSpace: 'pre-wrap' }}>
+          {renderNoteText(note.text)}
         </div>
       </div>
       {canModify && (
@@ -293,12 +311,33 @@ export default function RecipeDetailPage({ currentUser }) {
       </div>
 
       <Card padding={0} style={{ margin: isDesktop ? 0 : '0 var(--spacing-4)' }}>
-        {recipe.ingredients.map((ing, i) => (
-          <div key={ing.id}>
-            {i > 0 && <Divider />}
-            <IngredientRow ingredient={ing} scale={scale} onAdd={addToList} added={!!addedIds[ing.id]} />
-          </div>
-        ))}
+        {(() => {
+          let currentSection = null
+          return recipe.ingredients.map((ing, i) => {
+            const startsNewSection = ing.section && ing.section !== currentSection
+            currentSection = ing.section || currentSection
+            return (
+              <div key={ing.id}>
+                {i > 0 && <Divider />}
+                {startsNewSection && (
+                  <div
+                    style={{
+                      padding: 'var(--spacing-3) var(--spacing-4) 0',
+                      fontSize: 'var(--text-supporting-size)',
+                      fontWeight: 'var(--font-weight-semibold)',
+                      color: 'var(--color-text-secondary)',
+                      textTransform: 'uppercase',
+                      letterSpacing: '0.02em',
+                    }}
+                  >
+                    {ing.section}
+                  </div>
+                )}
+                <IngredientRow ingredient={ing} scale={scale} onAdd={addToList} added={!!addedIds[ing.id]} />
+              </div>
+            )
+          })
+        })()}
         {recipe.ingredients.length === 0 && (
           <div style={{ padding: 'var(--spacing-3) var(--spacing-4)', color: 'var(--color-text-secondary)' }}>
             No ingredients listed.

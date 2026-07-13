@@ -18,8 +18,8 @@ const SWIPE_THRESHOLD = 140
 
 /**
  * One list row. Interactions (from the design mockup):
- * - tap toggles checked (strike-through)
  * - swipe right = toggle checked, swipe left = remove
+ * - plain tap does nothing, so an accidental brush doesn't check an item
  */
 function ItemRow({ item, onToggle, onRemove, onRecategorise }) {
   const [dx, setDx] = useState(0)
@@ -47,8 +47,6 @@ function ItemRow({ item, onToggle, onRemove, onRecategorise }) {
     } else if (dx < -SWIPE_THRESHOLD) {
       onRemove(item)
       return
-    } else if (!dragRef.current.moved) {
-      onToggle(item) // plain tap
     }
     setDx(0)
   }
