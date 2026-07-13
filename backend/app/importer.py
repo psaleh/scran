@@ -312,10 +312,46 @@ def _parse_amount(text: str) -> tuple[float | None, str]:
     return None, text
 
 
+# Leading size/qualifier words that belong in the note, not the shoppable
+# name (spec §3.2: "1 small onion" → name "onion", note "small").
+_NOTE_PREFIX_WORDS = {"small", "medium", "large", "big", "extra-large", "ripe",
+                      "fresh", "frozen", "optional"}
+
+
+def _split_name_note(text: str) -> tuple[str, str | None]:
+    """Split an ingredient line into (name, note) per spec §3.2/§3.3:
+    parenthesised text and trailing text after the first comma go to the
+    note, as do leading size words like "small". Imperfect splits are fine —
+    the user reviews the result in the editor."""
+    notes: list[str] = []
+
+    # "(finely chopped)" anywhere in the line → note.
+    def _capture(match):
+        notes.append(match.group(1).strip())
+        return " "
+    text = re.sub(r"\(([^)]*)\)", _capture, text)
+
+    # "onion, finely diced" → everything after the first comma is note.
+    name, _, trailing = text.partition(",")
+    if trailing.strip():
+        notes.append(trailing.strip())
+
+    # "small onion" → strip leading qualifier words into the note.
+    words = name.split()
+    prefix: list[str] = []
+    while len(words) > 1 and words[0].lower() in _NOTE_PREFIX_WORDS:
+        prefix.append(words.pop(0).lower())
+    notes = prefix + notes
+    name = " ".join(words).strip()
+
+    notes = [n for n in notes if n]
+    return name, ", ".join(notes) or None
+
+
 def _parse_ingredient(text: str) -> dict:
-    """Split "2 tbsp olive oil" into amount/unit/name. Best-effort — whatever
-    doesn't parse cleanly just stays in the name for the user to tidy in the
-    editor (this is a review flow, not a data pipeline)."""
+    """Split "2 tbsp olive oil" into amount/unit/name/note. Best-effort —
+    whatever doesn't parse cleanly just stays in the name for the user to
+    tidy in the editor (this is a review flow, not a data pipeline)."""
     text = " ".join(unescape(text).split())
     amount, rest = _parse_amount(text)
     unit = None
@@ -330,12 +366,13 @@ def _parse_ingredient(text: str) -> dict:
     if unit:
         # "2 cups of flour" → drop the connecting "of".
         rest = re.sub(r"^of\s+", "", rest, flags=re.IGNORECASE)
-    name = rest.strip()
+    name, note = _split_name_note(rest.strip())
     return {
         # Round away float-division noise ("⅓" → 0.33, not 0.3333333…).
         "amount": round(amount, 2) if amount is not None else None,
         "unit": unit,
         "name": name or text,  # never return an empty name
+        "note": note,
         "category_id": None,
         "scalable": True,
     }

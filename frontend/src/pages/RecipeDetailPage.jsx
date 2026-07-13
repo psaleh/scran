@@ -36,6 +36,10 @@ function IngredientRow({ ingredient, scale, onAdd, added }) {
       </div>
       <div style={{ flex: 1, minWidth: 0, fontSize: 'var(--font-size-xl)', color: 'var(--color-text-primary)' }}>
         {ingredient.name}
+        {/* Full line is rendered from the parts (spec §3.2): "onion — small, finely diced" */}
+        {ingredient.note && (
+          <span style={{ color: 'var(--color-text-secondary)' }}> — {ingredient.note}</span>
+        )}
       </div>
       <IconButton
         label={added ? 'Added to list' : 'Add to shopping list'}

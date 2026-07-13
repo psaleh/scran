@@ -58,6 +58,8 @@ def _item(row: sqlite3.Row) -> dict:
         "name": row["name"],
         "amount": row["amount"],
         "unit": row["unit"],
+        # Copied for completeness; the list UI de-emphasises it (spec §4.4).
+        "note": row["note"],
         "category_id": row["category_id"],
         "recipe_id": row["recipe_id"],
         "recipe_title": row["recipe_title"],
@@ -134,10 +136,10 @@ def add_from_recipe(
     created = []
     for ing in ingredients:
         cur = db.execute(
-            "INSERT INTO shopping_items (name, amount, unit, category_id,"
-            " recipe_id, added_by) VALUES (?, ?, ?, ?, ?, ?)",
-            (ing["name"], ing["amount"], ing["unit"], ing["category_id"],
-             body.recipe_id, user["id"]),
+            "INSERT INTO shopping_items (name, amount, unit, note, category_id,"
+            " recipe_id, added_by) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (ing["name"], ing["amount"], ing["unit"], ing["note"],
+             ing["category_id"], body.recipe_id, user["id"]),
         )
         created.append(cur.lastrowid)
     db.commit()

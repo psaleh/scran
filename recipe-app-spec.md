@@ -35,7 +35,9 @@ A household recipe manager and shopping list app. Recipes come in via manual ent
 
 ### 3.2 Ingredients (structured)
 Each ingredient row on a recipe:
-- `amount` (decimal, nullable), `unit` (text, nullable), `name` (text, required)
+- `amount` (decimal, nullable), `unit` (text, nullable), `name` (text, required), `note` (text, nullable)
+- **`name` must contain only the shoppable item** (litmus test: what you'd write on a shopping list). Everything else — preparation ("finely diced", "minced"), size ("small", "large"), qualifiers ("optional", "divided", "at room temperature", "plus extra for dusting") — belongs in `note`. This keeps the ingredient lookup table clean (one "onion" entry regardless of prep) and makes shopping list duplicate-grouping work.
+- Recipe display renders the full line from the parts, e.g. "1 onion — small, finely diced". The editor has a small optional note field beside each ingredient row; autocomplete applies to the name field only.
 - `category_id` — links to grocery category (see 3.5)
 - `scalable` (boolean, default true) — non-scalable items (e.g. "pinch of salt", "1 bay leaf") stay fixed when servings change.
 
@@ -48,7 +50,9 @@ Each ingredient row on a recipe:
 
 ### 3.3 Recipe input methods
 1. **Manual entry** — form with dynamic ingredient rows (autocomplete per 3.2) and step list.
-2. **Website import** — user pastes a URL; server fetches the page and parses schema.org/Recipe structured data (JSON-LD preferred, microdata fallback). Result opens pre-filled in the editor for review. Store the source URL. Fail gracefully with a clear message when a site has no structured data.
+2. **Website import** — user pastes a URL; server fetches the page and parses schema.org/Recipe structured data (JSON-LD preferred, microdata fallback). **Ingredient lines must be split into name vs note** per 3.2: text in parentheses, or trailing text after a comma following the ingredient name, goes to `note` (e.g. "1 small onion, finely diced" → name "onion", note "small, finely diced"). Imperfect splits are acceptable — the result opens pre-filled in the editor for review. Store the source URL, and **retain the fetched page text** alongside the draft to power AI redraft (5.6).
+   - **AI redraft:** a "Tidy up with AI" action on URL-imported drafts sends the stored page text plus the current draft to the AI for correction (job type per 5.6). Result returns as a revised draft for review — never auto-applied.
+   - **AI fallback for unparseable sites:** when a page has no schema.org data, offer "Try AI extraction instead?" — same job, page text only, no draft. Only hard-fail when the user declines or no AI profile is configured.
 3. **AI photo import** — user uploads photo(s) of cookbook/magazine pages (multi-page recipes supported: multiple photos = one job). Photos land in an **import inbox** as queued jobs. See section 5 (AI integration & job queue). Output is a `draft` recipe with photos attached for side-by-side review.
 
 ### 3.4 Shopping list
@@ -104,16 +108,16 @@ Each ingredient row on a recipe:
 ### 4.4 Data model (agreed)
 Tables:
 - **users** (id, username, password_hash, is_admin, created_at)
-- **recipes** (id, title, description, servings, tags, photo_path, source_url, status[draft|published], created_by, created_at, updated_at)
-- **ingredients** (id, recipe_id FK, position, amount, unit, name, category_id FK nullable, scalable bool)
+- **recipes** (id, title, description, servings, tags, photo_path, source_url, source_page_text, status[draft|published], created_by, created_at, updated_at) — source_page_text stores the fetched readable text for URL imports, powering the redraft job (5.5); null for manual/photo recipes
+- **ingredients** (id, recipe_id FK, position, amount, unit, name, note, category_id FK nullable, scalable bool)
 - **steps** (id, recipe_id FK, position, text)
 - **recipe_notes** (id, recipe_id FK, user_id FK, text, created_at, updated_at)
 - **categories** (id, name)
 - **stores** (id, name)
 - **store_category_order** (store_id FK, category_id FK, position) — composite PK
-- **shopping_items** (id, name, amount, unit, category_id FK nullable, recipe_id FK nullable, checked bool, added_by, created_at)
+- **shopping_items** (id, name, amount, unit, note, category_id FK nullable, recipe_id FK nullable, checked bool, added_by, created_at) — note is copied for completeness but de-emphasised in the list UI (name is what matters in the supermarket)
 - **ingredient_lookup** (ingredient_name PK normalised, category_id FK, use_count int)
-- **jobs** (id, type[photo_import|categorise], status[pending|running|done|failed], payload JSON, result JSON, error text, attempts, created_at, updated_at)
+- **jobs** (id, type[photo_import|categorise|url_redraft|name_note_cleanup], status[pending|running|done|failed], payload JSON, result JSON, error text, attempts, created_at, updated_at)
 - **ai_profiles** (id, name, base_url, api_key, model, is_default) — API keys stored server-side only, never sent to the browser.
 
 Tags may be a simple comma/JSON field in v1; a proper tags join table is acceptable if search stays simple.
@@ -132,7 +136,7 @@ Tags may be a simple comma/JSON field in v1; a proper tags join table is accepta
 - Import inbox UI shows each job: thumbnail, status (queued / processing / needs review / failed), and actions.
 
 ### 5.3 Photo import job
-- Input: 1..n photos for one recipe. Send images directly to the vision model with a prompt requesting **structured JSON only**: title, description, servings, ingredients[{amount, unit, name}], steps[]. Parse defensively (strip markdown fences, validate, tolerate nulls).
+- Input: 1..n photos for one recipe. Send images directly to the vision model with a prompt requesting **structured JSON only**: title, description, servings, ingredients[{amount, unit, name, note}], steps[]. The prompt must instruct that **name is the bare purchasable ingredient only** — preparation, size, and qualifiers like "optional" go in `note` (see 3.2). Parse defensively (strip markdown fences, validate, tolerate nulls).
 - Output: create a `draft` recipe with the parsed data and original photos attached. Ingredient names then run through the categorisation flow (3.6).
 - Review screen: original photo(s) side-by-side (or stacked on mobile) with the editable draft. Publish button flips status to `published`.
 - Never auto-publish. Emphasise in the review UI that quantities should be checked (models misread numbers).
@@ -141,6 +145,18 @@ Tags may be a simple comma/JSON field in v1; a proper tags join table is accepta
 - Input: batch of unknown ingredient names + the current category list. Prompt for JSON mapping name → category (must be one of the provided categories or "other").
 - On completion: apply to the ingredients and write to `ingredient_lookup`.
 - Batch multiple pending names into one request where possible.
+
+### 5.5 URL import redraft job
+- Purpose: fix flawed URL-import drafts, and extract recipes from pages with no schema.org data.
+- Input: the **stored page text** (server-side fetched, stripped to readable text, truncated to a sane length for local-model context limits) plus, when redrafting, the current draft JSON. Never ask the model to fetch URLs itself.
+- Prompt: "here is a recipe web page and a possibly-flawed structured draft extracted from it — return a corrected recipe as JSON" (same schema and name/note rules as 5.3). In fallback mode (no schema.org data), same prompt without a draft.
+- Output: a revised draft presented for review, never auto-applied. The user's current draft (including any manual edits) is what gets sent, so corrections are preserved and built upon.
+- Triggered per-recipe from the draft editor ("Tidy up with AI") or from the failed-parse dialog; runs through the standard job queue.
+
+### 5.6 Name/note cleanup job (one-off, admin-triggered)
+- Purpose: repair ingredients created before the name/note split existed (e.g. names like "small onion (finely diced)").
+- Admin action in settings: "Clean up ingredient names". Enqueues a job batching all suspect ingredient names to the AI, requesting JSON pairs {clean_name, note} per ingredient.
+- Results are presented for review before applying (same review-first principle as photo import). On apply: update ingredient rows and rebuild affected `ingredient_lookup` entries, merging use_counts where names collapse into one.
 
 ## 6. Screens (for design phase)
 

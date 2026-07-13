@@ -26,6 +26,9 @@ class IngredientIn(BaseModel):
     amount: float | None = None
     unit: str | None = None
     name: str
+    # Prep/size/qualifiers ("finely diced", "optional") — never part of the
+    # shoppable name (spec §3.2).
+    note: str | None = None
     category_id: int | None = None
     scalable: bool = True
 
@@ -110,10 +113,10 @@ def _save_children(db: sqlite3.Connection, recipe_id: int, body: RecipeIn) -> No
             needs_ai.append(ing.name)
         db.execute(
             "INSERT INTO ingredients"
-            " (recipe_id, position, amount, unit, name, category_id, scalable)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?)",
+            " (recipe_id, position, amount, unit, name, note, category_id, scalable)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             (recipe_id, pos, ing.amount, ing.unit, ing.name.strip(),
-             category_id, int(ing.scalable)),
+             (ing.note or "").strip() or None, category_id, int(ing.scalable)),
         )
     for pos, text in enumerate(body.steps):
         if not text.strip():
@@ -192,6 +195,7 @@ def get_recipe(
             "amount": r["amount"],
             "unit": r["unit"],
             "name": r["name"],
+            "note": r["note"],
             "category_id": r["category_id"],
             "scalable": bool(r["scalable"]),
         }

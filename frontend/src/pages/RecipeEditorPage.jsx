@@ -18,7 +18,7 @@ import { sectionLabelStyle, stepNumberStyle } from '../styles.js'
 import { useIsDesktop } from '../useIsDesktop.js'
 
 let nextRowId = 1
-const newIngredient = () => ({ rowId: nextRowId++, amount: '', unit: '', name: '', category_id: null, scalable: true })
+const newIngredient = () => ({ rowId: nextRowId++, amount: '', unit: '', name: '', note: '', category_id: null, scalable: true })
 
 /**
  * Ingredient row with autocomplete against the lookup table (spec §3.2).
@@ -87,6 +87,14 @@ function IngredientRow({ ing, onChange, onRemove }) {
         </div>
         <IconButton label="Remove ingredient" icon={<span>×</span>} variant="ghost" onClick={onRemove} />
       </div>
+      {/* Prep/size/qualifiers live here, keeping the name shoppable (spec §3.2). */}
+      <TextInput
+        label="Note"
+        isLabelHidden
+        value={ing.note}
+        onChange={(v) => onChange({ ...ing, note: v })}
+        placeholder="Note, e.g. finely diced (optional)"
+      />
       <CheckboxInput label="Scales with servings" size="sm" value={ing.scalable} onChange={(v) => onChange({ ...ing, scalable: v })} />
     </div>
   )
@@ -128,7 +136,7 @@ export default function RecipeEditorPage() {
   const [status, setStatus] = useState('draft')
   const [ingredients, setIngredients] = useState(() =>
     prefill?.ingredients?.length
-      ? prefill.ingredients.map((i) => ({ ...newIngredient(), ...i, amount: i.amount == null ? '' : String(i.amount), unit: i.unit ?? '' }))
+      ? prefill.ingredients.map((i) => ({ ...newIngredient(), ...i, amount: i.amount == null ? '' : String(i.amount), unit: i.unit ?? '', note: i.note ?? '' }))
       : [newIngredient()],
   )
   const [steps, setSteps] = useState(prefill?.steps?.length ? prefill.steps : [''])
@@ -151,7 +159,7 @@ export default function RecipeEditorPage() {
         setStatus(r.status)
         setIngredients(
           r.ingredients.length
-            ? r.ingredients.map((i) => ({ ...newIngredient(), ...i, amount: i.amount == null ? '' : String(i.amount), unit: i.unit ?? '' }))
+            ? r.ingredients.map((i) => ({ ...newIngredient(), ...i, amount: i.amount == null ? '' : String(i.amount), unit: i.unit ?? '', note: i.note ?? '' }))
             : [newIngredient()],
         )
         setSteps(r.steps.length ? r.steps : [''])
@@ -203,6 +211,7 @@ export default function RecipeEditorPage() {
           amount: i.amount === '' ? null : Number(i.amount) || null,
           unit: i.unit || null,
           name: i.name,
+          note: i.note.trim() || null,
           category_id: i.category_id,
           scalable: i.scalable,
         })),
