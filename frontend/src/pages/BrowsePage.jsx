@@ -10,6 +10,7 @@ import { TextInput } from '@astryxdesign/core/TextInput'
 import { ToggleButton } from '@astryxdesign/core/ToggleButton'
 
 import { api } from '../api.js'
+import ImportDataDialog from '../components/ImportDataDialog.jsx'
 import ImportPhotosDialog from '../components/ImportPhotosDialog.jsx'
 import ImportUrlDialog from '../components/ImportUrlDialog.jsx'
 import ImportVideoDialog from '../components/ImportVideoDialog.jsx'
@@ -91,6 +92,7 @@ export default function BrowsePage() {
   const [importOpen, setImportOpen] = useState(false)
   const [photosOpen, setPhotosOpen] = useState(false)
   const [videoOpen, setVideoOpen] = useState(false)
+  const [dataImportOpen, setDataImportOpen] = useState(false)
   const isDesktop = useIsDesktop()
   const navigate = useNavigate()
 
@@ -118,6 +120,7 @@ export default function BrowsePage() {
     { label: 'Import from website…', onClick: () => setImportOpen(true) },
     { label: 'Import from photo…', onClick: () => setPhotosOpen(true) },
     { label: 'Import from YouTube…', onClick: () => setVideoOpen(true) },
+    { label: 'Import recipe data…', onClick: () => setDataImportOpen(true) },
   ]
 
   const isFreshInstall =
@@ -179,6 +182,7 @@ export default function BrowsePage() {
       <ImportUrlDialog isOpen={importOpen} onOpenChange={setImportOpen} />
       <ImportPhotosDialog isOpen={photosOpen} onOpenChange={setPhotosOpen} />
       <ImportVideoDialog isOpen={videoOpen} onOpenChange={setVideoOpen} />
+      <ImportDataDialog isOpen={dataImportOpen} onOpenChange={setDataImportOpen} />
 
       {/* Grid */}
       <div style={{ flex: 1, overflowY: 'auto', padding: isDesktop ? 'var(--spacing-6)' : 'var(--spacing-4)' }}>

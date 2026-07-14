@@ -13,6 +13,7 @@ import { TextArea } from '@astryxdesign/core/TextArea'
 import { ToggleButton } from '@astryxdesign/core/ToggleButton'
 
 import { api } from '../api.js'
+import ExportRecipeDialog from '../components/ExportRecipeDialog.jsx'
 import TagBadge from '../components/TagBadge.jsx'
 import { sectionLabelStyle, stepNumberStyle } from '../styles.js'
 import { useIsDesktop } from '../useIsDesktop.js'
@@ -172,6 +173,7 @@ export default function RecipeDetailPage({ currentUser }) {
   const [servings, setServings] = useState(null)
   // Ingredient ids briefly shown with a ✓ after being sent to the list.
   const [addedIds, setAddedIds] = useState({})
+  const [exportOpen, setExportOpen] = useState(false)
 
   const load = () => {
     api(`/api/recipes/${id}`)
@@ -296,6 +298,7 @@ export default function RecipeDetailPage({ currentUser }) {
             {recipe.status === 'draft' && (
               <Button label="Publish" variant="primary" size="sm" clickAction={publish} />
             )}
+            <Button label="Export" variant="secondary" size="sm" onClick={() => setExportOpen(true)} />
             <Button label="Edit" icon={<span>✎</span>} variant="secondary" size="sm" onClick={() => navigate(`/recipes/${recipe.id}/edit`)} />
           </div>
         </div>
@@ -404,6 +407,10 @@ export default function RecipeDetailPage({ currentUser }) {
     </div>
   )
 
+  const exportDialog = (
+    <ExportRecipeDialog recipeId={recipe.id} title={recipe.title} isOpen={exportOpen} onOpenChange={setExportOpen} />
+  )
+
   if (isDesktop) {
     return (
       <div style={{ flex: 1, overflowY: 'auto', padding: 'var(--spacing-6)' }}>
@@ -411,6 +418,7 @@ export default function RecipeDetailPage({ currentUser }) {
           <div style={{ position: 'sticky', top: 0, display: 'flex', flexDirection: 'column' }}>{leftColumn}</div>
           <div style={{ maxWidth: 640 }}>{rightColumn}</div>
         </div>
+        {exportDialog}
       </div>
     )
   }
@@ -419,6 +427,7 @@ export default function RecipeDetailPage({ currentUser }) {
     <div style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden' }}>
       {leftColumn}
       {rightColumn}
+      {exportDialog}
     </div>
   )
 }

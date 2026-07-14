@@ -1,5 +1,6 @@
 """Recipe CRUD, full-text search, photos, and cooking notes."""
 
+import base64
 import json
 import re
 import sqlite3
@@ -76,12 +77,54 @@ class VersionIn(RecipeIn):
     version_label: str | None = None
 
 
+# --- Cross-instance import/export --------------------------------------------
+# A deliberately separate, portable shape from RecipeIn/get_recipe: no raw
+# category_id (not portable across installs — see resolve_category), no
+# notes/versions/status (per-installation, not "the recipe"), photo bytes
+# embedded as base64 so a copy-paste round-trip carries the picture too.
+
+class IngredientExport(BaseModel):
+    amount: float | None = None
+    unit: str | None = None
+    name: str
+    note: str | None = None
+    category: str | None = None
+    scalable: bool = True
+    section: str | None = None
+
+
+class PhotoExport(BaseModel):
+    data: str
+    ext: str
+
+
+class RecipeExport(BaseModel):
+    scran_export: int = 1
+    title: str
+    description: str = ""
+    servings: int | None = None
+    tags: list[str] = []
+    ingredients: list[IngredientExport] = []
+    steps: list[str] = []
+    photo: PhotoExport | None = None
+
+
+class RecipeImportIn(BaseModel):
+    scran_export: int
+    title: str = Field(min_length=1)
+    description: str = ""
+    servings: int | None = None
+    tags: list[str] = []
+    ingredients: list[IngredientExport] = []
+    steps: list[str] = []
+    photo: PhotoExport | None = None
+
+
 # --- Helpers -----------------------------------------------------------------
 
-def _apply_photo_url(db: sqlite3.Connection, recipe_id: int, photo_url: str, old_photo_path: str | None) -> None:
-    """Download a chosen scraped photo (spec issue #2) and store it exactly
-    like a manual upload — same directory, same replace-on-change behaviour."""
-    data, ext = fetch_image(photo_url)
+def _save_photo_bytes(db: sqlite3.Connection, recipe_id: int, data: bytes, ext: str, old_photo_path: str | None) -> None:
+    """Write photo bytes to the uploads dir and point the recipe at them —
+    shared tail of the URL-fetch and data-import photo paths."""
     rel = f"recipes/{recipe_id}_{uuid.uuid4().hex[:8]}{ext}"
     dest = Path(config.UPLOADS_PATH) / rel
     dest.parent.mkdir(parents=True, exist_ok=True)
@@ -89,6 +132,13 @@ def _apply_photo_url(db: sqlite3.Connection, recipe_id: int, photo_url: str, old
     if old_photo_path:
         (Path(config.UPLOADS_PATH) / old_photo_path).unlink(missing_ok=True)
     db.execute("UPDATE recipes SET photo_path = ? WHERE id = ?", (rel, recipe_id))
+
+
+def _apply_photo_url(db: sqlite3.Connection, recipe_id: int, photo_url: str, old_photo_path: str | None) -> None:
+    """Download a chosen scraped photo (spec issue #2) and store it exactly
+    like a manual upload — same directory, same replace-on-change behaviour."""
+    data, ext = fetch_image(photo_url)
+    _save_photo_bytes(db, recipe_id, data, ext, old_photo_path)
 
 
 def _add_system_note(db: sqlite3.Connection, recipe_id: int, user_id: int, text: str) -> None:
@@ -299,6 +349,84 @@ def get_recipe(
         "notes": notes,
         "versions": versions,
     }
+
+
+@router.get("/recipes/{recipe_id}/export", response_model=RecipeExport)
+def export_recipe(
+    recipe_id: int,
+    db: sqlite3.Connection = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    """Portable JSON shape for moving a recipe to another Scran instance
+    (paste-and-import or file download/upload) — see RecipeExport."""
+    row = _get_recipe_or_404(db, recipe_id)
+    ingredient_rows = db.execute(
+        "SELECT i.*, c.name AS category_name FROM ingredients i"
+        " LEFT JOIN categories c ON c.id = i.category_id"
+        " WHERE i.recipe_id = ? ORDER BY i.position",
+        (recipe_id,),
+    ).fetchall()
+    ingredients = [
+        IngredientExport(
+            amount=r["amount"], unit=r["unit"], name=r["name"], note=r["note"],
+            category=r["category_name"], scalable=bool(r["scalable"]), section=r["section"],
+        )
+        for r in ingredient_rows
+    ]
+    steps = [
+        r["text"]
+        for r in db.execute(
+            "SELECT text FROM steps WHERE recipe_id = ? ORDER BY position", (recipe_id,)
+        )
+    ]
+    photo = None
+    if row["photo_path"]:
+        path = Path(config.UPLOADS_PATH) / row["photo_path"]
+        if path.exists():
+            photo = PhotoExport(data=base64.b64encode(path.read_bytes()).decode("ascii"), ext=path.suffix)
+    return RecipeExport(
+        title=row["title"], description=row["description"], servings=row["servings"],
+        tags=json.loads(row["tags"]), ingredients=ingredients, steps=steps, photo=photo,
+    )
+
+
+@router.post("/recipes/import", status_code=201)
+def import_recipe(
+    body: RecipeImportIn,
+    db: sqlite3.Connection = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    """Create a recipe from another Scran instance's export. category_id is
+    not portable across installs, so ingredients carry a category name here
+    and get re-matched (or left for the usual AI-categorise fallback)."""
+    if body.scran_export != 1:
+        raise HTTPException(status_code=422, detail="Unrecognised recipe data format")
+
+    ingredients = []
+    for ing in body.ingredients:
+        category_id = None
+        if ing.category:
+            match = db.execute(
+                "SELECT id FROM categories WHERE lower(name) = lower(?)", (ing.category,)
+            ).fetchone()
+            category_id = match["id"] if match else None
+        ingredients.append(IngredientIn(
+            amount=ing.amount, unit=ing.unit, name=ing.name, note=ing.note,
+            category_id=category_id, scalable=ing.scalable, section=ing.section,
+        ))
+
+    recipe_in = RecipeIn(
+        title=body.title, description=body.description, servings=body.servings,
+        tags=body.tags, status="draft", ingredients=ingredients, steps=body.steps,
+    )
+    created = create_recipe(body=recipe_in, db=db, user=user)
+
+    if body.photo:
+        data = base64.b64decode(body.photo.data)
+        _save_photo_bytes(db, created["id"], data, body.photo.ext, old_photo_path=None)
+    _add_system_note(db, created["id"], user["id"], "Imported from recipe data")
+    db.commit()
+    return get_recipe(created["id"], db, user)
 
 
 @router.post("/recipes", status_code=201)
