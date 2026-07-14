@@ -229,6 +229,33 @@ export default function RecipeDetailPage({ currentUser }) {
     flashAdded(recipe.ingredients.map((i) => i.id))
   }
 
+  // PUT /api/recipes/{id} replaces the whole recipe, so this must resend the
+  // current fields (not just status) or ingredients/steps would be wiped.
+  const publish = async () => {
+    await api(`/api/recipes/${recipe.id}`, {
+      method: 'PUT',
+      body: {
+        title: recipe.title,
+        description: recipe.description,
+        servings: recipe.servings,
+        tags: recipe.tags,
+        source_url: recipe.source_url,
+        status: 'published',
+        ingredients: recipe.ingredients.map((i) => ({
+          name: i.name,
+          amount: i.amount,
+          unit: i.unit,
+          note: i.note,
+          scalable: i.scalable,
+          category_id: i.category_id,
+          section: i.section,
+        })),
+        steps: recipe.steps,
+      },
+    })
+    load()
+  }
+
   const leftColumn = (
     <>
       {/* Photo header with back/edit floating buttons */}
@@ -265,7 +292,12 @@ export default function RecipeDetailPage({ currentUser }) {
           <h1 style={{ margin: 0, fontSize: 'var(--text-heading-1-size)', fontWeight: 'var(--text-heading-1-weight)', color: 'var(--color-text-primary)' }}>
             {recipe.title}
           </h1>
-          <Button label="Edit" icon={<span>✎</span>} variant="secondary" size="sm" onClick={() => navigate(`/recipes/${recipe.id}/edit`)} />
+          <div style={{ display: 'flex', gap: 'var(--spacing-2)', flexShrink: 0 }}>
+            {recipe.status === 'draft' && (
+              <Button label="Publish" variant="primary" size="sm" clickAction={publish} />
+            )}
+            <Button label="Edit" icon={<span>✎</span>} variant="secondary" size="sm" onClick={() => navigate(`/recipes/${recipe.id}/edit`)} />
+          </div>
         </div>
 
         <div style={{ display: 'flex', gap: 'var(--spacing-2)', flexWrap: 'wrap', alignItems: 'center' }}>
