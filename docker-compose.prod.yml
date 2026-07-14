@@ -1,0 +1,24 @@
+# Production deployment: pulls the prebuilt image from GHCR instead of
+# building locally (spec §4.3). Put this file + a .env (see .env.example)
+# on the docker host and run `docker compose -f docker-compose.prod.yml up -d`.
+# Backup = copy ./data and ./uploads (stop-free thanks to SQLite WAL;
+# for extra safety use `sqlite3 data/scran.db ".backup backup.db"`).
+
+services:
+  scran:
+    image: ghcr.io/psaleh/scran:latest
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/data          # SQLite database
+      - ./uploads:/uploads    # recipe & import photos
+    environment:
+      SCRAN_SESSION_SECRET: ${SCRAN_SESSION_SECRET:?set in .env}
+      # First-run only: creates this admin if no users exist yet.
+      SCRAN_ADMIN_USERNAME: ${SCRAN_ADMIN_USERNAME:-}
+      SCRAN_ADMIN_PASSWORD: ${SCRAN_ADMIN_PASSWORD:-}
+      # SSO via reverse-proxy header (off by default, spec §2):
+      # SCRAN_AUTH_TRUST_HEADER: "true"
+      # SCRAN_AUTH_HEADER_NAME: "Remote-User"
+      # SCRAN_AUTH_TRUSTED_PROXY_IPS: "172.18.0.2"
+    restart: unless-stopped
