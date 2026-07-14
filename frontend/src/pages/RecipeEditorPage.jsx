@@ -149,7 +149,7 @@ function StepRow({ index, text, total, onChange, onRemove, onMove }) {
 }
 
 /** Recipe editor: manual entry and editing (later also import review, spec §6.4). */
-export default function RecipeEditorPage() {
+export default function RecipeEditorPage({ currentUser }) {
   const { id } = useParams() // undefined on /recipes/new
   const navigate = useNavigate()
   const isDesktop = useIsDesktop()
@@ -474,12 +474,13 @@ export default function RecipeEditorPage() {
               hasChevron={false}
               items={[
                 { label: 'Save as version…', onClick: () => setVersionDialogOpen(true) },
-                { label: 'Delete…', onClick: () => setDeleteDialogOpen(true) },
+                // Deleting recipes is admin-only (spec: destructive, shared data).
+                ...(currentUser?.is_admin ? [{ label: 'Delete…', onClick: () => setDeleteDialogOpen(true) }] : []),
               ]}
               menuWidth={180}
             />
           )}
-          {id !== undefined && isDesktop && (
+          {id !== undefined && isDesktop && currentUser?.is_admin && (
             <Button label="Delete…" variant="destructive" size="sm" onClick={() => setDeleteDialogOpen(true)} />
           )}
           {id !== undefined && isDesktop && (

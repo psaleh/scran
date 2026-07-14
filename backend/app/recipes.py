@@ -11,7 +11,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from . import config, worker
-from .auth.deps import get_current_user
+from .auth.deps import get_current_admin, get_current_user
 from .db import get_db
 from .importer import fetch_image
 from .ingredients import enqueue_categorise_job, resolve_category
@@ -363,7 +363,7 @@ def update_recipe(
 def delete_recipe(
     recipe_id: int,
     db: sqlite3.Connection = Depends(get_db),
-    user=Depends(get_current_user),
+    user=Depends(get_current_admin),
 ):
     row = _get_recipe_or_404(db, recipe_id)
     if row["photo_path"]:

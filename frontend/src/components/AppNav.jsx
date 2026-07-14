@@ -1,4 +1,5 @@
 import { NavLink } from 'react-router-dom'
+import { IconButton } from '@astryxdesign/core/IconButton'
 import { useIsDesktop } from '../useIsDesktop.js'
 
 // Navigation shell from the design project's shared.jsx: a top bar on
@@ -43,7 +44,7 @@ function itemStyle({ active, disabled }) {
   }
 }
 
-export default function AppNav() {
+export default function AppNav({ onLogout }) {
   const isDesktop = useIsDesktop()
 
   if (isDesktop) {
@@ -70,6 +71,14 @@ export default function AppNav() {
             {item.label}
           </NavLink>
         ))}
+        <IconButton
+          label="Log out"
+          icon={<span>⎋</span>}
+          variant="ghost"
+          size="sm"
+          onClick={onLogout}
+          style={{ marginLeft: 'auto' }}
+        />
       </nav>
     )
   }
@@ -109,6 +118,25 @@ export default function AppNav() {
           )}
         </NavLink>
       ))}
+      <button
+        type="button"
+        onClick={onLogout}
+        style={{
+          ...itemStyle({ active: false, disabled: false }),
+          flex: 1,
+          flexDirection: 'column',
+          gap: 2,
+          padding: 'var(--spacing-2) 0',
+          fontSize: 'var(--text-supporting-size)',
+          background: 'none',
+          border: 'none',
+          fontFamily: 'inherit',
+          cursor: 'pointer',
+        }}
+      >
+        <span style={{ width: 6, height: 6, borderRadius: 'var(--radius-full)', background: 'transparent' }} />
+        Log out
+      </button>
     </nav>
   )
 }
