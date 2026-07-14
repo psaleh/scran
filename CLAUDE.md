@@ -1,19 +1,21 @@
 # Scran — guidance for AI agents
 
 Household recipe manager + shopping list, self-hosted in a single Docker
-container. The full spec is `recipe-app-spec.md` — read the relevant section
-before building a feature, and respect §8 "Settled decisions (do not relitigate)".
+container. Design phase is complete — this file is now the sole spec and
+project record (the standalone spec doc has been folded in and removed).
+Respect "Settled decisions (do not relitigate)" below.
 
 **Built so far**: auth + sessions, recipe CRUD/browse/detail/editor with FTS5
-search (ingredient sections, manual delete w/ confirm, tag autocomplete
-against existing DB tags with arrow-key selection), cooking notes (including
-server-added provenance notes — see below), photo upload, recipe versions
-("save as version", migration 002), shopping list (copy-from-recipe,
-store-ordered grouping, swipe-only complete/remove — plain tap does
-nothing), stores/categories, and the Settings screens (AI profiles, stores
-route editor, categories, users, auth info), and website URL import
-(`backend/app/importer.py`, JSON-LD + microdata, plus photo-candidate
-scraping — see below). AI slice stages 1–3.5 are done and owner-tested:
+search (ingredient sections, manual delete w/ confirm — admin-only, see
+below, tag autocomplete against existing DB tags with arrow-key selection),
+cooking notes (including server-added provenance notes — see below), photo
+upload, recipe versions ("save as version", migration 002), shopping list
+(copy-from-recipe, store-ordered grouping, swipe-only complete/remove —
+plain tap does nothing), stores/categories, and the Settings screens (AI
+profiles, stores route editor, categories, users, auth info), website URL
+import (`backend/app/importer.py`, JSON-LD + microdata, plus photo-candidate
+scraping — see below), and cross-instance recipe import/export (JSON
+paste-or-file, see below). AI slice stages 1–3.5 are done and owner-tested:
 shared AI client (`backend/app/ai.py`), profile test-connection, job queue
 worker (`backend/app/worker.py`), jobs API (`backend/app/jobs.py`), the
 import inbox screen (`frontend/src/pages/InboxPage.jsx`), the categorise job
@@ -39,8 +41,36 @@ they still run when the owner's local-model PC is off. Frontend:
 `ImportVideoDialog.jsx` (Browse → "Import from YouTube…"); inbox review
 opens the draft recipe directly (no photos column).
 **Remaining**: AI slice stage 5 (name/note cleanup job + removing the
-temporary test-job button/endpoint — spec §5 has the details), PWA service
-worker.
+temporary test-job button/endpoint — see "AI integration" below), PWA
+service worker.
+
+## Recent additions (2026-07-14, not yet folded into narrative above)
+
+- **Recipe import/export** (`ExportRecipeDialog.jsx`, `ImportDataDialog.jsx`):
+  a portable JSON shape for moving a single recipe between Scran instances,
+  separate from the AI import flows — no review queue, saved as a draft
+  immediately. `GET /api/recipes/{id}/export` returns `RecipeExport`
+  (`backend/app/recipes.py`): title/description/servings/tags/ingredients
+  (with category **name**, not `category_id` — ids aren't portable across
+  installs)/steps/photo (base64-embedded so a copy-paste round-trip carries
+  the picture). `POST /api/recipes/import` (`RecipeImportIn`) re-matches
+  each ingredient's category name against this instance's categories
+  (falls back to the normal uncategorised/AI-categorise flow on a miss).
+  Both dialogs offer copy-to-clipboard/paste and file download/upload.
+  Export is reachable from `RecipeDetailPage.jsx`; import from
+  `BrowsePage.jsx`'s add menu.
+- **Publish button** on `RecipeDetailPage.jsx`: draft recipes get a
+  "Publish" button beside "Edit" that PUTs the recipe with `status:
+  'published'` — resends the full recipe body (title/ingredients/steps/etc,
+  not just status) since `PUT /api/recipes/{id}` replaces the whole record.
+- **Admin-only recipe delete**: `DELETE /api/recipes/{id}` now depends on
+  `get_current_admin`, not `get_current_user` — matches the Users/Settings
+  admin gating already in place.
+- **Logout**: `AppNav.jsx` takes an `onLogout` prop and renders a logout
+  control (icon button on desktop nav, bottom-nav item on mobile).
+- **Production Docker Compose**: `docker-compose.prod.yml` at repo root
+  (separate from the dev `docker-compose.yml`) for deploying the built
+  image with the two persistent volumes.
 
 ## Post-launch fixes (GitHub issues, 2026-07-13)
 
@@ -186,6 +216,133 @@ follow-on mechanics future agents should know about:
   GET /models and POST /chat/completions, returning fenced recipe JSON when
   the request contains `image_url` parts (past sessions' `fake_ai.py`
   lived in the job scratchpad and is gone — recreate it).
+
+## Product spec
+
+### Purpose & users
+A household recipe manager and shared shopping list. Recipes come in via
+manual entry, website import, or AI-assisted photo/video import. The
+shopping list sorts itself to match the walking route of whichever
+supermarket is selected. Small number of household users, created by an
+admin (no self-signup/email verification), username+password + session
+cookie. All recipe/list/store data is **shared** across the household — no
+per-user silos. SSO-ready: auth is isolated in its own module with a config
+option (off by default) to trust a reverse-proxy header (e.g. `Remote-User`)
+for identity, restricted to configured trusted proxy IPs, so
+Authelia/Authentik can be adopted later without a rewrite.
+
+### Feature set
+- **Recipes**: title, description, photo, servings, free-form multi tags,
+  ingredients, steps, source URL, `status` (`draft`/`published` —
+  AI-imported recipes always arrive `draft`). Servings stepper on the detail
+  page live-scales displayed ingredient amounts (display only, never
+  mutates stored data). Full-text search (FTS5) on title/description/
+  ingredients/notes; filter by tags.
+- **Cooking notes**: a journal on the recipe detail page (not the editor) —
+  free text, automatic timestamp + author, newest-first, lightweight inline
+  add box. Append-style history: a note's author (or an admin) can edit/
+  delete their own note, but notes are never affected by recipe edits.
+  Shared household data; searchable via the same FTS index (a note hit
+  surfaces its recipe).
+- **Ingredients (structured)**: `amount` (decimal, nullable), `unit`
+  (nullable), `name` (required), `note` (nullable), `category_id`,
+  `scalable` (bool, default true — non-scalable items like "pinch of salt"
+  stay fixed when servings change). **`name` must contain only the shoppable
+  item** (litmus test: what you'd write on a shopping list) — preparation
+  ("finely diced"), size ("small"), qualifiers ("optional", "divided") all
+  belong in `note`. Keeps the ingredient lookup table clean (one "onion"
+  regardless of prep) and makes shopping-list duplicate-grouping work.
+  Detail page renders the full line from the parts, e.g. "1 onion — small,
+  finely diced". Autocomplete on the name field (recipe editor AND shopping
+  list manual-add): suggest from `ingredient_lookup` after ≥2 characters,
+  starts-with matches first then contains, ordered by `use_count` desc
+  within each group; selecting one silently attaches its category; free
+  text always allowed, unknown names enter the categorisation flow.
+- **Recipe input methods**: manual entry; website URL import (see below);
+  AI photo import (multi-photo = one job, lands in the import inbox); AI
+  YouTube video import (see above); cross-instance JSON import/export (see
+  above).
+- **Shopping list**: one shared list. Sources: per-ingredient "add to list"
+  + "add all" from a recipe, or manual add with autocomplete. Items are
+  **copies, not links** — sending an ingredient copies name/amount/unit/
+  category and records the originating `recipe_id` as a tag; editing the
+  recipe later never touches the list and vice versa. Duplicates are never
+  auto-merged — identical names are visually grouped adjacent to each other
+  instead (no unit conversion). Store-ordered sorting: a store selector
+  groups items by category, ordered per the selected store's walking route;
+  uncategorised items sort into an "Uncategorised" group at the bottom;
+  switching stores only changes presentation order, never data.
+- **Stores & categories**: categories are an editable list (seed defaults:
+  produce, meat & fish, dairy & eggs, bakery, tinned & jarred, dry goods &
+  pasta, frozen, drinks, snacks, condiments & spices, household, other).
+  Stores are user-defined with a drag-and-drop category ordering
+  representing the walking route; new categories default to the end of
+  every store's order.
+- **Ingredient categorisation flow**: on save, normalise the name (trim,
+  lowercase) and check `ingredient_lookup`. Hit → apply stored category, no
+  AI. Miss → save uncategorised, enqueue an AI categorisation job; on
+  completion apply the category and write it to the lookup table. Manual
+  override anywhere (editor or shopping list) writes back to the lookup
+  table so it sticks. Uncategorised items are never blocked. Lookup rows
+  carry `use_count`, incremented on each use, powering autocomplete ranking.
+- **Explicitly NOT in v1 (backlog, do not build)**: meal planning calendar
+  (data model shouldn't preclude it, but no schema/UI work now); unit
+  conversion / smart merging of duplicate shopping items; per-user private
+  recipes or lists; recipe import from other apps (Mealie/Tandoor
+  migration — the JSON import/export above is Scran-to-Scran only).
+
+### Architecture
+Single Docker container: web app + built-in background worker for the job
+queue (no separate Redis/queue container). SQLite on a mounted volume, WAL
+mode, FTS5 for search. Uploads (recipe photos, import photos) on a second
+mounted volume, referenced by path in the DB. Backup story: stop-free
+backup via SQLite online backup or litestream-style copy; at minimum, "copy
+the two volumes" is the documented procedure. Config via env vars (DB path,
+uploads path, session secret, trusted-proxy-header toggle + allowed proxy
+IPs, AI profile defaults); runtime-editable settings (AI profiles, stores,
+categories) live in the DB via the Settings UI, not env vars. Outbound
+internet access is needed only for user-initiated URL imports and the
+configured AI endpoint — no telemetry, no other external calls.
+
+### AI integration & job queue (product-level)
+- Multiple named AI profiles (base URL, API key, model name, all
+  OpenAI-compatible chat completions); user picks the active one in
+  Settings. Typical setup: a local LM Studio profile for everyday work and
+  a cloud OpenRouter profile for video (see the dedicated video-purpose
+  profile above).
+- Jobs persist in `jobs`, survive restarts. Worker probes the active
+  endpoint before running; unreachable → jobs stay pending and retry on the
+  next poll, so "the local-model PC isn't always on" degrades gracefully
+  (photos/videos queue up and process when the endpoint reappears). Failed
+  jobs record the error, retry with backoff up to a small max attempts,
+  then surface a visible error + manual retry in the import inbox.
+- AI drafts always require human review before publishing — never
+  auto-applied, never auto-published.
+
+### Screens
+Mobile-first; desktop is an enhancement. Primary venues: kitchen (recipe
+view) and supermarket (shopping list). Login (minimal) · Recipe browse/home
+(card grid, search, tag filter chips, add menu: manual/URL/photo/video/
+import-data) · Recipe detail (photo, servings stepper, ingredients with
+add-to-list, steps, cooking notes, Edit/Publish/Export) · Recipe editor
+(manual entry + all draft review flows: dynamic ingredient rows with
+autocomplete, reorderable steps, photo upload, publish/save-draft) · Import
+inbox (queued/processing/failed jobs + drafts awaiting review, AI endpoint
+status indicator) · Shopping list (store selector, category-grouped
+store-ordered items, recipe tags, adjacent duplicate grouping, manual add,
+clear-checked) · Settings (AI profiles, stores route editor, categories,
+users (admin-only), auth options).
+
+### Settled decisions (do not relitigate)
+- Shopping list items are copies with a recipe tag, not live links.
+- No auto-merge of duplicate list items; group visually instead.
+- AI drafts always require human review before publishing.
+- Local lookup table is consulted before any AI categorisation call.
+- Meal planning calendar is backlog, not v1.
+- Simple auth now, trusted-header SSO support as a config option.
+- Frontend is a React SPA built on the Astryx design system (pre-built
+  stylesheet path), chosen deliberately as a React learning project — do
+  not swap it for server-rendered templates or another component library.
 
 ## Owner context
 
