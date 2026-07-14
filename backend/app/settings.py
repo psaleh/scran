@@ -6,6 +6,7 @@ API keys are stored server-side and NEVER returned to the browser (§7).
 """
 
 import sqlite3
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
@@ -193,6 +194,9 @@ class AiProfileIn(BaseModel):
     model: str = Field(min_length=1)
     # Empty/omitted on update means "keep the stored key".
     api_key: str | None = None
+    # 'general' = everyday worker profile; 'video' = used only for YouTube
+    # video imports (needs a video-capable hosted model).
+    purpose: Literal["general", "video"] = "general"
 
 
 def _profile(row: sqlite3.Row) -> dict:
@@ -201,6 +205,7 @@ def _profile(row: sqlite3.Row) -> dict:
         "name": row["name"],
         "base_url": row["base_url"],
         "model": row["model"],
+        "purpose": row["purpose"],
         "is_default": bool(row["is_default"]),
         # The key itself never leaves the server.
         "has_key": bool(row["api_key"]),
@@ -220,13 +225,18 @@ def create_profile(
 ):
     try:
         cur = db.execute(
-            "INSERT INTO ai_profiles (name, base_url, api_key, model) VALUES (?, ?, ?, ?)",
-            (body.name.strip(), body.base_url.strip(), body.api_key or "", body.model.strip()),
+            "INSERT INTO ai_profiles (name, base_url, api_key, model, purpose)"
+            " VALUES (?, ?, ?, ?, ?)",
+            (body.name.strip(), body.base_url.strip(), body.api_key or "",
+             body.model.strip(), body.purpose),
         )
     except sqlite3.IntegrityError:
         raise HTTPException(status_code=409, detail="A profile with that name exists")
-    # First profile automatically becomes the active one.
-    if db.execute("SELECT COUNT(*) AS n FROM ai_profiles").fetchone()["n"] == 1:
+    # First general profile automatically becomes the active one (a
+    # video-only profile shouldn't receive categorise/photo jobs).
+    if body.purpose == "general" and db.execute(
+        "SELECT COUNT(*) AS n FROM ai_profiles WHERE is_default = 1"
+    ).fetchone()["n"] == 0:
         db.execute("UPDATE ai_profiles SET is_default = 1 WHERE id = ?", (cur.lastrowid,))
     db.commit()
     return _profile(db.execute("SELECT * FROM ai_profiles WHERE id = ?", (cur.lastrowid,)).fetchone())
@@ -243,10 +253,14 @@ def update_profile(
     if row is None:
         raise HTTPException(status_code=404, detail="Profile not found")
     db.execute(
-        "UPDATE ai_profiles SET name = ?, base_url = ?, model = ?, api_key = ?"
-        " WHERE id = ?",
+        "UPDATE ai_profiles SET name = ?, base_url = ?, model = ?, api_key = ?,"
+        " purpose = ?, is_default = ? WHERE id = ?",
         (body.name.strip(), body.base_url.strip(), body.model.strip(),
-         body.api_key if body.api_key else row["api_key"], profile_id),
+         body.api_key if body.api_key else row["api_key"], body.purpose,
+         # Switching the active profile to video-only would leave the worker
+         # sending everyday jobs to it — drop the active flag instead.
+         row["is_default"] if body.purpose == "general" else 0,
+         profile_id),
     )
     db.commit()
     return _profile(db.execute("SELECT * FROM ai_profiles WHERE id = ?", (profile_id,)).fetchone())
@@ -258,8 +272,16 @@ def activate_profile(
     db: sqlite3.Connection = Depends(get_db),
     user=Depends(get_current_user),
 ):
-    if db.execute("SELECT 1 FROM ai_profiles WHERE id = ?", (profile_id,)).fetchone() is None:
+    row = db.execute("SELECT * FROM ai_profiles WHERE id = ?", (profile_id,)).fetchone()
+    if row is None:
         raise HTTPException(status_code=404, detail="Profile not found")
+    if row["purpose"] != "general":
+        # The active profile handles every everyday job (categorise, photo
+        # import, redraft) — a video-only profile isn't meant for those.
+        raise HTTPException(
+            status_code=400,
+            detail="A video-import profile can't be the everyday active profile",
+        )
     db.execute("UPDATE ai_profiles SET is_default = 0")
     db.execute("UPDATE ai_profiles SET is_default = 1 WHERE id = ?", (profile_id,))
     db.commit()

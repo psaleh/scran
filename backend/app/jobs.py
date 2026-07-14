@@ -28,7 +28,7 @@ def _job(row: sqlite3.Row, recipe_status: str | None = None) -> dict:
             summary += ", …"
     elif row["type"] == "photo_import":
         summary = f"{len(payload.get('photos', []))} photo(s)"
-    elif row["type"] == "url_redraft":
+    elif row["type"] in ("url_redraft", "video_import"):
         summary = payload.get("url", "")
     elif row["type"] == "test":
         summary = "Trivial AI round-trip (dev)"

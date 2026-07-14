@@ -102,6 +102,13 @@ def _poll_once():
     try:
         profile = ai.get_active_profile(conn)
         jobs = _due_jobs(conn)
+        # Video imports run against the dedicated video profile (a hosted,
+        # always-on endpoint like OpenRouter) and must not be blocked by the
+        # everyday profile's PC being switched off — probe and run them
+        # separately from the general queue.
+        video_jobs = [j for j in jobs if j["type"] == "video_import"]
+        jobs = [j for j in jobs if j["type"] != "video_import"]
+        blocked = False  # any work left pending because its endpoint is down
 
         # Refresh the status indicator: probe if there's work waiting or the
         # cached result is getting old. Skipping the probe when idle+fresh
@@ -110,27 +117,45 @@ def _poll_once():
             stale = time.time() - _status["_checked_monotonic"] > PROBE_CACHE_SECONDS
         if profile is None:
             _set_status(None, None)
-            return POLL_SECONDS
-        if jobs or stale:
+        elif jobs or stale:
             reachable = ai.probe(profile)
             _set_status(profile["name"], reachable)
         else:
             reachable = ai_status()["reachable"]
 
-        if not jobs:
-            return POLL_SECONDS
-        if not reachable:
+        if video_jobs:
+            video_profile = ai.get_video_profile(conn)
+            if video_profile is None:
+                # Profile deleted after the jobs were queued (the import
+                # endpoint refuses to queue without one) — leave them
+                # pending; they'll run if a video profile comes back.
+                log.info("%d video job(s) pending but no video profile configured",
+                         len(video_jobs))
+            elif ai.probe(video_profile):
+                for job in video_jobs:
+                    if _stop.is_set():
+                        break
+                    _run_job(conn, video_profile, job)
+            else:
+                blocked = True
+                log.info(
+                    "%d video job(s) pending but endpoint %r unreachable; retrying in %ds",
+                    len(video_jobs), video_profile["name"], UNREACHABLE_POLL_SECONDS,
+                )
+
+        if jobs and profile is not None and reachable:
+            for job in jobs:
+                if _stop.is_set():
+                    break
+                _run_job(conn, profile, job)
+        elif jobs and profile is not None:
+            blocked = True
             log.info(
                 "%d job(s) pending but endpoint %r unreachable; retrying in %ds",
                 len(jobs), profile["name"], UNREACHABLE_POLL_SECONDS,
             )
-            return UNREACHABLE_POLL_SECONDS
 
-        for job in jobs:
-            if _stop.is_set():
-                break
-            _run_job(conn, profile, job)
-        return POLL_SECONDS
+        return UNREACHABLE_POLL_SECONDS if blocked else POLL_SECONDS
     finally:
         conn.close()
 
@@ -508,6 +533,53 @@ def _url_redraft_job(conn, profile, payload):
     return result
 
 
+def _create_draft_recipe(conn, recipe, user_id, note, source_url=None):
+    """Persist a coerced AI recipe as a *draft* (never published — settled
+    decision: a human reviews every AI import in the editor). Shared by the
+    photo and video import handlers. Ingredient names run through the normal
+    categorisation flow (§3.6); `note` becomes the provenance cooking note
+    (issue #4), attributed to whoever queued the import. Commits."""
+    # Deferred import: ingredients.py imports this module for wake().
+    from .ingredients import enqueue_categorise_job, resolve_category
+
+    cur = conn.execute(
+        "INSERT INTO recipes (title, description, servings, tags, source_url,"
+        " status, created_by) VALUES (?, ?, ?, ?, ?, 'draft', ?)",
+        (recipe["title"], recipe["description"], recipe["servings"],
+         json.dumps(recipe["tags"]), source_url, user_id),
+    )
+    recipe_id = cur.lastrowid
+    conn.execute(
+        "UPDATE recipes SET version_group = ? WHERE id = ?", (recipe_id, recipe_id)
+    )
+    needs_ai = []
+    for pos, ing in enumerate(recipe["ingredients"]):
+        category_id, miss = resolve_category(conn, ing["name"], None)
+        if miss:
+            needs_ai.append(ing["name"])
+        conn.execute(
+            "INSERT INTO ingredients"
+            " (recipe_id, position, amount, unit, name, note, category_id, scalable, section)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?)",
+            (recipe_id, pos, ing["amount"], ing["unit"], ing["name"],
+             ing["note"], category_id, ing["section"]),
+        )
+    for pos, text in enumerate(recipe["steps"]):
+        conn.execute(
+            "INSERT INTO steps (recipe_id, position, text) VALUES (?, ?, ?)",
+            (recipe_id, pos, text),
+        )
+    enqueue_categorise_job(conn, needs_ai)
+
+    if user_id is not None:
+        conn.execute(
+            "INSERT INTO recipe_notes (recipe_id, user_id, text) VALUES (?, ?, ?)",
+            (recipe_id, user_id, note),
+        )
+    conn.commit()
+    return recipe_id
+
+
 # Stage 1 of the photo import: pure transcription, one photo per call.
 # Deliberately minimal — this exact wording was owner-tested against
 # qwen3-vl in LM Studio chat and produced word-for-word output, where a
@@ -561,9 +633,6 @@ def _photo_import_job(conn, profile, payload):
     recipe — never published; a human reviews it against the original photos
     in the editor (via the inbox's "Review draft"). Ingredient names run
     through the normal categorisation flow (§3.6)."""
-    # Deferred import: ingredients.py imports this module for wake().
-    from .ingredients import enqueue_categorise_job, resolve_category
-
     photo_paths = payload.get("photos") or []
     if not photo_paths:
         raise ValueError("photo import job has no photos")
@@ -600,45 +669,10 @@ def _photo_import_job(conn, profile, payload):
     )
     recipe = _coerce_recipe(_extract_json(reply))
 
-    # Create the draft recipe directly (spec §5.3) — the review screen edits
-    # this row, so re-running "Review draft" never duplicates anything.
-    cur = conn.execute(
-        "INSERT INTO recipes (title, description, servings, tags, status, created_by)"
-        " VALUES (?, ?, ?, ?, 'draft', ?)",
-        (recipe["title"], recipe["description"], recipe["servings"],
-         json.dumps(recipe["tags"]), payload.get("user_id")),
+    recipe_id = _create_draft_recipe(
+        conn, recipe, payload.get("user_id"),
+        note=f"Imported by AI from {len(photo_paths)} photo(s)",
     )
-    recipe_id = cur.lastrowid
-    conn.execute(
-        "UPDATE recipes SET version_group = ? WHERE id = ?", (recipe_id, recipe_id)
-    )
-    needs_ai = []
-    for pos, ing in enumerate(recipe["ingredients"]):
-        category_id, miss = resolve_category(conn, ing["name"], None)
-        if miss:
-            needs_ai.append(ing["name"])
-        conn.execute(
-            "INSERT INTO ingredients"
-            " (recipe_id, position, amount, unit, name, note, category_id, scalable, section)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?)",
-            (recipe_id, pos, ing["amount"], ing["unit"], ing["name"],
-             ing["note"], category_id, ing["section"]),
-        )
-    for pos, text in enumerate(recipe["steps"]):
-        conn.execute(
-            "INSERT INTO steps (recipe_id, position, text) VALUES (?, ?, ?)",
-            (recipe_id, pos, text),
-        )
-    enqueue_categorise_job(conn, needs_ai)
-
-    # Provenance note (issue #4), attributed to whoever queued the import.
-    if payload.get("user_id") is not None:
-        conn.execute(
-            "INSERT INTO recipe_notes (recipe_id, user_id, text) VALUES (?, ?, ?)",
-            (recipe_id, payload["user_id"],
-             f"Imported by AI from {len(photo_paths)} photo(s)"),
-        )
-    conn.commit()
     log.info(
         "Photo import job created draft recipe %d (%d ingredients, %d steps)",
         recipe_id, len(recipe["ingredients"]), len(recipe["steps"]),
@@ -652,6 +686,72 @@ def _photo_import_job(conn, profile, payload):
         "title": recipe["title"],
         "photos": photo_paths,
         "transcription": transcription,
+        "ingredients": len(recipe["ingredients"]),
+        "steps": len(recipe["steps"]),
+    }
+
+
+# YouTube video import: unlike the photo pipeline there is no transcription
+# stage — the video-capable model (e.g. Gemini via OpenRouter) watches the
+# video itself, so this is a single multimodal call. The same defensive
+# rules as RECIPE_JSON_SPEC apply; response_format=json_object additionally
+# asks the endpoint to guarantee JSON output.
+VIDEO_PROMPT = """\
+Analyze the visual frames and audio of this YouTube video. Extract the
+recipe details — the recipe being cooked, its ingredients with amounts, and
+the step-by-step instructions in the order they are performed. Only include
+ingredients and amounts actually shown or stated in the video; never fill
+gaps with a typical version of the dish. If the video states prep/cook
+times, mention them at the end of the description. You must return a valid
+JSON object matching the requested schema.
+
+{spec}
+
+--- EXISTING TAGS IN USE ---
+{existing_tags}"""
+
+
+@handles("video_import")
+def _video_import_job(conn, profile, payload):
+    """AI YouTube import: send the video URL to the model and create a
+    *draft* recipe for review, exactly like the photo import. `profile` here
+    is the dedicated video profile (purpose = 'video'), not the everyday
+    active one — _poll_once routes video jobs separately, since local
+    models can't watch video."""
+    url = payload.get("url")
+    if not url:
+        raise ValueError("video import job has no URL")
+
+    content = [
+        {"type": "text", "text": VIDEO_PROMPT.format(
+            spec=RECIPE_JSON_SPEC,
+            existing_tags=", ".join(_existing_tags(conn)) or "(none yet)",
+        )},
+        # OpenRouter's multimodal video form: the URL is passed straight
+        # through to the model; nothing is downloaded by us.
+        {"type": "video_url", "video_url": {"url": url}},
+    ]
+    reply = ai.chat(
+        profile,
+        [{"role": "user", "content": content}],
+        temperature=0,
+        response_format={"type": "json_object"},
+    )
+    recipe = _coerce_recipe(_extract_json(reply))
+
+    recipe_id = _create_draft_recipe(
+        conn, recipe, payload.get("user_id"),
+        note="Imported by AI from YouTube video",
+        source_url=url,
+    )
+    log.info(
+        "Video import job created draft recipe %d (%d ingredients, %d steps)",
+        recipe_id, len(recipe["ingredients"]), len(recipe["steps"]),
+    )
+    return {
+        "recipe_id": recipe_id,
+        "title": recipe["title"],
+        "url": url,
         "ingredients": len(recipe["ingredients"]),
         "steps": len(recipe["steps"]),
     }

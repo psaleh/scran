@@ -16,6 +16,7 @@ const POLL_MS = 5000
 
 const TYPE_LABELS = {
   photo_import: 'Photo import',
+  video_import: 'YouTube import',
   categorise: 'Categorise ingredients',
   url_redraft: 'AI recipe tidy-up',
   name_note_cleanup: 'Ingredient name cleanup',
@@ -33,7 +34,11 @@ const STATUS_META = {
 
 // Job types whose output is a draft a human must review before it becomes a
 // recipe (settled decision: AI drafts always require review).
-const REVIEW_TYPES = new Set(['photo_import', 'url_redraft'])
+const REVIEW_TYPES = new Set(['photo_import', 'video_import', 'url_redraft'])
+
+// Review jobs whose worker already created the draft recipe — reviewing
+// just opens that recipe (job.recipe_id), never a prefilled new one.
+const DRAFT_CREATED_TYPES = new Set(['photo_import', 'video_import'])
 
 function JobCard({ job, onRetry, onReview }) {
   // Once the linked recipe is published, the review is done — stop
@@ -72,7 +77,7 @@ function JobCard({ job, onRetry, onReview }) {
             {Object.entries(job.result.categories).map(([name, cat]) => `${name} → ${cat}`).join(', ')}
           </div>
         )}
-        {job.status === 'done' && job.type === 'photo_import' && job.result?.title && (
+        {job.status === 'done' && DRAFT_CREATED_TYPES.has(job.type) && job.result?.title && (
           <div style={{ fontSize: 'var(--text-supporting-size)', color: 'var(--color-text-secondary)' }}>
             Draft: “{job.result.title}” — {job.result.ingredients} ingredient(s), {job.result.steps} step(s)
           </div>
@@ -88,7 +93,7 @@ function JobCard({ job, onRetry, onReview }) {
             <Button label="Retry" variant="secondary" size="sm" clickAction={() => onRetry(job.id)} />
           </div>
         )}
-        {needsReview && (job.type === 'photo_import' ? job.recipe_id != null : job.result?.recipe) && (
+        {needsReview && (DRAFT_CREATED_TYPES.has(job.type) ? job.recipe_id != null : job.result?.recipe) && (
           <div style={{ display: 'flex', gap: 'var(--spacing-2)', marginTop: 'var(--spacing-1)' }}>
             <Button label="Review draft" variant="primary" size="sm" clickAction={() => onReview(job)} />
           </div>
@@ -151,6 +156,12 @@ export default function InboxPage() {
           reviewTranscription: job.result?.transcription ?? '',
         },
       })
+      return
+    }
+    // Video imports also saved their draft; there are no originals to show
+    // alongside (the source video is linked from the recipe itself).
+    if (job.type === 'video_import') {
+      navigate(`/recipes/${job.recipe_id}/edit`)
       return
     }
     const { recipe, url, page_text: pageText, image_urls: imageUrls } = job.result

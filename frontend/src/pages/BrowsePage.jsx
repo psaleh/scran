@@ -12,6 +12,7 @@ import { ToggleButton } from '@astryxdesign/core/ToggleButton'
 import { api } from '../api.js'
 import ImportPhotosDialog from '../components/ImportPhotosDialog.jsx'
 import ImportUrlDialog from '../components/ImportUrlDialog.jsx'
+import ImportVideoDialog from '../components/ImportVideoDialog.jsx'
 import TagBadge from '../components/TagBadge.jsx'
 import { useIsDesktop } from '../useIsDesktop.js'
 
@@ -89,6 +90,7 @@ export default function BrowsePage() {
   const [error, setError] = useState('')
   const [importOpen, setImportOpen] = useState(false)
   const [photosOpen, setPhotosOpen] = useState(false)
+  const [videoOpen, setVideoOpen] = useState(false)
   const isDesktop = useIsDesktop()
   const navigate = useNavigate()
 
@@ -115,6 +117,7 @@ export default function BrowsePage() {
     { label: 'Manual entry', onClick: () => navigate('/recipes/new') },
     { label: 'Import from website…', onClick: () => setImportOpen(true) },
     { label: 'Import from photo…', onClick: () => setPhotosOpen(true) },
+    { label: 'Import from YouTube…', onClick: () => setVideoOpen(true) },
   ]
 
   const isFreshInstall =
@@ -175,6 +178,7 @@ export default function BrowsePage() {
 
       <ImportUrlDialog isOpen={importOpen} onOpenChange={setImportOpen} />
       <ImportPhotosDialog isOpen={photosOpen} onOpenChange={setPhotosOpen} />
+      <ImportVideoDialog isOpen={videoOpen} onOpenChange={setVideoOpen} />
 
       {/* Grid */}
       <div style={{ flex: 1, overflowY: 'auto', padding: isDesktop ? 'var(--spacing-6)' : 'var(--spacing-4)' }}>

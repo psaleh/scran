@@ -56,6 +56,7 @@ function AiProfilesSection() {
         base_url: editing.base_url || '',
         model: editing.model || '',
         api_key: editing.api_key || null,
+        purpose: editing.purpose || 'general',
       }
       if (editing.id) await api(`/api/ai-profiles/${editing.id}`, { method: 'PUT', body })
       else await api('/api/ai-profiles', { method: 'POST', body })
@@ -94,6 +95,9 @@ function AiProfilesSection() {
       <span style={hintStyle}>
         OpenAI-compatible endpoints used for photo import and ingredient
         categorisation. The active profile is used by the background worker.
+        A profile marked for YouTube imports is used only to extract recipes
+        from videos — it needs a video-capable hosted model (e.g.
+        google/gemini-2.5-flash via OpenRouter).
       </span>
       {profiles.length > 0 && (
         <Card padding={0}>
@@ -105,13 +109,17 @@ function AiProfilesSection() {
                   <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--spacing-2)' }}>
                     <span style={{ fontWeight: 'var(--font-weight-medium)', color: 'var(--color-text-primary)' }}>{p.name}</span>
                     {p.is_default && <Badge label="Active" variant="success" />}
+                    {p.purpose === 'video' && <Badge label="YouTube" variant="info" />}
                     {!p.has_key && <Badge label="No key" variant="neutral" />}
                   </div>
                   <span style={{ fontSize: 'var(--text-supporting-size)', color: 'var(--color-text-secondary)' }}>
                     {p.base_url} — {p.model}
                   </span>
                 </div>
-                {!p.is_default && <Button label="Use" size="sm" variant="secondary" clickAction={() => activate(p.id)} />}
+                {/* A video-only profile can't be the everyday active one. */}
+                {!p.is_default && p.purpose !== 'video' && (
+                  <Button label="Use" size="sm" variant="secondary" clickAction={() => activate(p.id)} />
+                )}
                 <Button
                   label={testingId === p.id ? 'Testing…' : 'Test'}
                   size="sm"
@@ -152,6 +160,11 @@ function AiProfilesSection() {
               onChange={(v) => setEditing({ ...editing, api_key: v })}
               isOptional
               description={editing.id ? 'Leave blank to keep the stored key.' : 'Leave blank for keyless endpoints like LM Studio.'}
+            />
+            <CheckboxInput
+              label="Use only for YouTube video imports"
+              value={editing.purpose === 'video'}
+              onChange={(v) => setEditing({ ...editing, purpose: v ? 'video' : 'general' })}
             />
             <div style={{ display: 'flex', gap: 'var(--spacing-2)', justifyContent: 'flex-end' }}>
               <Button label="Cancel" variant="ghost" onClick={() => setEditing(null)} />

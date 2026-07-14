@@ -23,6 +23,21 @@ AI" — available on the very first import review, before any manual save).
 Stage 4 (photo import + review screen) is built and verified end-to-end
 against a fake AI server, but **not yet owner-tested with real cookbook
 photos** — see "AI slice" below for its shape.
+YouTube video import is also built (2026-07-14, verified against a fake AI
+server, not yet owner-tested): `POST /api/import/video` (`importer.py`)
+validates the link and queues a `video_import` job; `_video_import_job` in
+`worker.py` makes ONE multimodal call (`video_url` content part +
+`response_format: json_object`) to the **dedicated video AI profile**
+(`ai_profiles.purpose = 'video'`, migration 008 — video needs a hosted
+video-capable model like Gemini via OpenRouter, so it's separate from the
+everyday active profile; `activate` refuses video profiles and the Settings
+profile dialog has a purpose checkbox). The job creates the draft itself via
+`_create_draft_recipe()` (shared with photo_import; sets `source_url` to
+the video link, provenance note "Imported by AI from YouTube video").
+`_poll_once` probes/runs video jobs separately from the general queue so
+they still run when the owner's local-model PC is off. Frontend:
+`ImportVideoDialog.jsx` (Browse → "Import from YouTube…"); inbox review
+opens the draft recipe directly (no photos column).
 **Remaining**: AI slice stage 5 (name/note cleanup job + removing the
 temporary test-job button/endpoint — spec §5 has the details), PWA service
 worker.

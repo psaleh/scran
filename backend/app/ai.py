@@ -34,6 +34,16 @@ def get_active_profile(db):
     return db.execute("SELECT * FROM ai_profiles WHERE is_default = 1").fetchone()
 
 
+def get_video_profile(db):
+    """The profile dedicated to YouTube video extraction (purpose = 'video'),
+    or None — video import is unavailable until the household configures one
+    (it needs a video-capable hosted model, e.g. Gemini via OpenRouter,
+    which is usually not the same endpoint as the everyday profile)."""
+    return db.execute(
+        "SELECT * FROM ai_profiles WHERE purpose = 'video' ORDER BY id LIMIT 1"
+    ).fetchone()
+
+
 def _endpoint(profile, path):
     return profile["base_url"].rstrip("/") + path
 
@@ -65,19 +75,25 @@ def _headers(profile):
     return headers
 
 
-def chat(profile, messages, max_tokens=None, timeout=CHAT_TIMEOUT_SECONDS, temperature=None):
+def chat(profile, messages, max_tokens=None, timeout=CHAT_TIMEOUT_SECONDS, temperature=None,
+         response_format=None):
     """Send a chat-completions request and return the assistant message text.
 
     `messages` is standard OpenAI format (role/content dicts; content may be
-    the multimodal list form for vision requests). Raises AiError with a
-    human-readable message on any failure. Pass temperature=0 for
-    transcription/extraction tasks where inventiveness is a bug.
+    the multimodal list form for vision/video requests). Raises AiError with
+    a human-readable message on any failure. Pass temperature=0 for
+    transcription/extraction tasks where inventiveness is a bug, and
+    response_format={"type": "json_object"} to ask hosted endpoints for
+    guaranteed-JSON replies (local servers may ignore it — callers must
+    still parse defensively).
     """
     payload = {"model": profile["model"], "messages": messages}
     if max_tokens is not None:
         payload["max_tokens"] = max_tokens
     if temperature is not None:
         payload["temperature"] = temperature
+    if response_format is not None:
+        payload["response_format"] = response_format
     body = json.dumps(payload).encode("utf-8")
 
     log.info(

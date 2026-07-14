@@ -25,7 +25,7 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, UploadFile
 from pydantic import BaseModel, Field
 
-from . import config, worker
+from . import ai, config, worker
 from .auth.deps import get_current_user
 from .db import get_db
 from .jobs import _job
@@ -589,6 +589,51 @@ def import_from_url_ai(
     cur = db.execute(
         "INSERT INTO jobs (type, payload) VALUES ('url_redraft', ?)",
         (json.dumps({"url": url, "page_text": text, "image_urls": _image_urls(None, html)}),),
+    )
+    db.commit()
+    worker.wake()
+    return _job(db.execute("SELECT * FROM jobs WHERE id = ?", (cur.lastrowid,)).fetchone())
+
+
+# The YouTube URL shapes we accept: watch pages, shorts, and youtu.be short
+# links. Anything else is rejected up front — the model can't watch
+# arbitrary video hosts, and a typo'd URL should fail here, not as a job.
+_YOUTUBE_URL_RE = re.compile(
+    r"^https?://(?:www\.|m\.)?"
+    r"(?:youtube\.com/(?:watch\?\S*v=[\w-]{5,}|shorts/[\w-]{5,})|youtu\.be/[\w-]{5,})",
+    re.IGNORECASE,
+)
+
+
+@router.post("/import/video", status_code=201)
+def import_from_video(
+    body: ImportRequest,
+    db: sqlite3.Connection = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    """AI YouTube import: validate the link, then queue a video_import job.
+    The worker sends the URL to the dedicated video AI profile and creates a
+    draft recipe; the inbox offers it for review. Both failure modes the
+    user can fix are rejected here (bad URL, no video profile); transient
+    endpoint errors (rate limits, outages) surface on the job itself, which
+    retries with backoff and can be retried manually from the inbox."""
+    url = body.url.strip()
+    if not _YOUTUBE_URL_RE.match(url):
+        raise HTTPException(
+            status_code=400,
+            detail="Enter a YouTube video link (youtube.com/watch, youtube.com/shorts, or youtu.be)",
+        )
+    if ai.get_video_profile(db) is None:
+        raise HTTPException(
+            status_code=400,
+            detail="No video AI profile configured — add one under Settings → AI "
+                   "profiles and mark it for YouTube video imports",
+        )
+    cur = db.execute(
+        "INSERT INTO jobs (type, payload) VALUES ('video_import', ?)",
+        # user_id: the worker attributes the draft + provenance note to
+        # whoever queued the import.
+        (json.dumps({"url": url, "user_id": user["id"]}),),
     )
     db.commit()
     worker.wake()
