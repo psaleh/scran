@@ -351,8 +351,30 @@ export default function RecipeDetailPage({ currentUser }) {
 
       <Card padding={0} style={{ margin: isDesktop ? 0 : '0 var(--spacing-4)' }}>
         {(() => {
+          // Group ingredients by section regardless of where they fall in
+          // the stored order, so the same heading (e.g. two "Golf" rows
+          // separated by a "Graft" row) always renders as one contiguous
+          // block instead of repeating. Un-sectioned ingredients form their
+          // own (heading-less) group and always come first. Within each
+          // group, and across groups, original array order is preserved —
+          // groups appear in the order their section first shows up.
+          const noSection = []
+          const bySection = new Map()
+          const sectionOrder = []
+          for (const ing of recipe.ingredients) {
+            if (!ing.section) {
+              noSection.push(ing)
+              continue
+            }
+            if (!bySection.has(ing.section)) {
+              bySection.set(ing.section, [])
+              sectionOrder.push(ing.section)
+            }
+            bySection.get(ing.section).push(ing)
+          }
+          const ordered = [...noSection, ...sectionOrder.flatMap((s) => bySection.get(s))]
           let currentSection = null
-          return recipe.ingredients.map((ing, i) => {
+          return ordered.map((ing, i) => {
             const startsNewSection = ing.section && ing.section !== currentSection
             currentSection = ing.section || currentSection
             return (

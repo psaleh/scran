@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import { Badge } from '@astryxdesign/core/Badge'
 import { Button } from '@astryxdesign/core/Button'
@@ -23,15 +23,129 @@ import { useIsDesktop } from '../useIsDesktop.js'
 let nextRowId = 1
 const newIngredient = () => ({ rowId: nextRowId++, amount: '', unit: '', name: '', note: '', category_id: null, scalable: true, section: '' })
 
+const reorder = (list, from, to) => {
+  const copy = [...list]
+  const [moved] = copy.splice(from, 1)
+  copy.splice(to, 0, moved)
+  return copy
+}
+
+/**
+ * Returns per-row drag-and-drop props for a reorderable list: `handle`
+ * (spread onto the small grip element that starts the drag — dragging is
+ * restricted to the handle so it doesn't fight with text selection in the
+ * row's inputs) and `row` (spread onto the row container, so dropping
+ * anywhere on the row — not just the handle — reorders it). Dragging an
+ * ingredient above/below a section heading changes which section it
+ * effectively belongs to (issue: rows added after a heading always
+ * inherited it with no way to opt out — dragging one above the first
+ * heading is how it becomes un-sectioned again).
+ */
+function useDragReorder(setList) {
+  const [draggedIndex, setDraggedIndex] = useState(null)
+  const [dragOverIndex, setDragOverIndex] = useState(null)
+
+  const propsFor = (index) => ({
+    handle: {
+      draggable: true,
+      onDragStart: (e) => {
+        setDraggedIndex(index)
+        e.dataTransfer.effectAllowed = 'move'
+      },
+      onDragEnd: () => {
+        setDraggedIndex(null)
+        setDragOverIndex(null)
+      },
+    },
+    row: {
+      // Some browsers only treat an element as a valid drop target if
+      // dragenter (not just dragover) had preventDefault called on it —
+      // relying on dragover alone made drops miss intermittently.
+      onDragEnter: (e) => {
+        if (draggedIndex === null) return
+        e.preventDefault()
+        if (dragOverIndex !== index) setDragOverIndex(index)
+      },
+      onDragOver: (e) => {
+        if (draggedIndex === null) return
+        e.preventDefault()
+        if (dragOverIndex !== index) setDragOverIndex(index)
+      },
+      onDrop: (e) => {
+        e.preventDefault()
+        if (draggedIndex !== null && draggedIndex !== index) {
+          setList((list) => reorder(list, draggedIndex, index))
+        }
+        setDraggedIndex(null)
+        setDragOverIndex(null)
+      },
+    },
+    isDragging: draggedIndex === index,
+    isDragOver: dragOverIndex === index && draggedIndex !== index,
+  })
+
+  return propsFor
+}
+
+/**
+ * Trailing drop target inside a reorderable list's Card, sized for "insert
+ * after the last row" — without it, dragging past the last row (toward the
+ * Add button below the Card) leaves the drop over empty space with no
+ * listener, so the drag just cancels and there's no way to move an item to
+ * the bottom of the list.
+ */
+function DragEndZone({ drag }) {
+  return (
+    <div
+      {...drag.row}
+      style={{
+        // Generously sized — a thin strip is an easy target to overshoot
+        // while dragging, which is exactly what made "drop at the bottom"
+        // unreliable.
+        height: 'var(--spacing-8)',
+        boxShadow: drag.isDragOver ? 'inset 0 2px 0 0 var(--color-accent)' : 'none',
+      }}
+    />
+  )
+}
+
+function DragHandle({ handleProps }) {
+  return (
+    <div
+      {...handleProps}
+      aria-label="Drag to reorder"
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        width: 20,
+        flexShrink: 0,
+        cursor: 'grab',
+        color: 'var(--color-text-secondary)',
+        touchAction: 'none',
+      }}
+    >
+      <span style={{ fontSize: 18, lineHeight: 1, userSelect: 'none' }}>⠿</span>
+    </div>
+  )
+}
+
 /**
  * Ingredient row with autocomplete against the lookup table (spec §3.2).
  * Free text is always allowed; picking a suggestion silently attaches the
  * known category.
  */
-function IngredientRow({ ing, categories, onChange, onRemove }) {
+function IngredientRow({ ing, categories, sectionOptions, onChange, onRemove, drag }) {
   const [suggestions, setSuggestions] = useState([])
   const [open, setOpen] = useState(false)
   const blurTimer = useRef(null)
+  // Inline ghost-text autocomplete for the section heading: as the user
+  // types, the rest of the best-matching existing heading is appended to the
+  // input and shown selected (highlighted) — typing further overwrites it
+  // like normal, and Enter/Tab collapses the selection to accept it. Avoids
+  // a floating suggestion panel entirely, so nothing can clip.
+  const sectionInputRef = useRef(null)
+  const [sectionMatch, setSectionMatch] = useState(null)
 
   useEffect(() => {
     if (ing.name.trim().length < 2 || !open) {
@@ -51,9 +165,67 @@ function IngredientRow({ ing, categories, onChange, onRemove }) {
     setOpen(false)
   }
 
+  // The displayed value includes the suggested tail (so it's the input's
+  // real controlled value, not a manual DOM override that a re-render would
+  // just clobber); ing.section — what actually gets saved — stays just the
+  // typed prefix until the suggestion is accepted. Only the selection
+  // (highlighting the tail) needs an effect, since React doesn't manage that.
+  const sectionDisplayValue = sectionMatch ?? ing.section
+
+  useLayoutEffect(() => {
+    const el = sectionInputRef.current
+    if (!el || !sectionMatch) return
+    el.setSelectionRange(ing.section.length, sectionMatch.length)
+  }, [sectionMatch, ing.section])
+
+  const onSectionChange = (v) => {
+    onChange({ ...ing, section: v })
+    const typed = v.trim()
+    // Only suggest while the value is growing (the user is typing forward).
+    // Otherwise deleting from an accepted suggestion would immediately
+    // re-match its own shortened prefix and re-append the same tail,
+    // making backspace look like it does nothing.
+    const isGrowing = v.length > ing.section.length
+    const match = typed && isGrowing
+      ? sectionOptions.find((s) => s.toLowerCase().startsWith(typed.toLowerCase()) && s.toLowerCase() !== typed.toLowerCase())
+      : null
+    setSectionMatch(match ? v + match.slice(typed.length) : null)
+  }
+
+  const acceptSectionMatch = () => {
+    if (!sectionMatch) return
+    onChange({ ...ing, section: sectionMatch })
+    setSectionMatch(null)
+    // Collapse the cursor to the end — otherwise the browser's own selection
+    // (still covering the just-accepted tail) survives the accept, and the
+    // next Backspace deletes that whole highlighted range in one go.
+    const el = sectionInputRef.current
+    if (el) requestAnimationFrame(() => el.setSelectionRange(sectionMatch.length, sectionMatch.length))
+  }
+
+  const onSectionKeyDown = (e) => {
+    if (!sectionMatch) return
+    if (e.key === 'Enter' || e.key === 'Tab') {
+      if (e.key === 'Enter') e.preventDefault()
+      acceptSectionMatch()
+    } else if (e.key === 'Escape') {
+      setSectionMatch(null)
+    }
+  }
+
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-2)', padding: 'var(--spacing-3) var(--spacing-4)' }}>
+    <div
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 'var(--spacing-2)',
+        padding: 'var(--spacing-3) var(--spacing-4)',
+        opacity: drag.isDragging ? 0.4 : 1,
+        boxShadow: drag.isDragOver ? 'inset 0 2px 0 0 var(--color-accent)' : 'none',
+      }}
+    >
       <div style={{ display: 'flex', gap: 'var(--spacing-2)' }}>
+        <DragHandle handleProps={drag.handle} />
         <div style={{ width: 64, flexShrink: 0 }}>
           <TextInput label="Amount" isLabelHidden value={ing.amount} onChange={(v) => onChange({ ...ing, amount: v })} placeholder="qty" />
         </div>
@@ -106,10 +278,13 @@ function IngredientRow({ ing, categories, onChange, onRemove }) {
             (issue #1: real recipes group ingredients, e.g. "For the sauce"). */}
         <div style={{ flex: '1 1 180px', minWidth: 0 }}>
           <TextInput
+            ref={sectionInputRef}
             label="Section heading"
             isLabelHidden
-            value={ing.section}
-            onChange={(v) => onChange({ ...ing, section: v })}
+            value={sectionDisplayValue}
+            onChange={onSectionChange}
+            onKeyDown={onSectionKeyDown}
+            onBlur={acceptSectionMatch}
             placeholder="Section heading, e.g. For the sauce (optional)"
           />
         </div>
@@ -132,18 +307,23 @@ function IngredientRow({ ing, categories, onChange, onRemove }) {
   )
 }
 
-function StepRow({ index, text, total, onChange, onRemove, onMove }) {
+function StepRow({ index, text, onChange, onRemove, drag }) {
   return (
-    <div style={{ display: 'flex', gap: 'var(--spacing-3)', padding: 'var(--spacing-3) var(--spacing-4)' }}>
+    <div
+      style={{
+        display: 'flex',
+        gap: 'var(--spacing-3)',
+        padding: 'var(--spacing-3) var(--spacing-4)',
+        opacity: drag.isDragging ? 0.4 : 1,
+        boxShadow: drag.isDragOver ? 'inset 0 2px 0 0 var(--color-accent)' : 'none',
+      }}
+    >
+      <DragHandle handleProps={drag.handle} />
       <div style={{ ...stepNumberStyle, marginTop: 2 }}>{index + 1}</div>
       <div style={{ flex: 1 }}>
         <TextArea label={`Step ${index + 1}`} isLabelHidden value={text} onChange={onChange} rows={2} placeholder={`Step ${index + 1}…`} />
       </div>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 2, flexShrink: 0 }}>
-        <IconButton label="Move up" icon={<span>↑</span>} variant="ghost" size="sm" isDisabled={index === 0} onClick={() => onMove(-1)} />
-        <IconButton label="Move down" icon={<span>↓</span>} variant="ghost" size="sm" isDisabled={index === total - 1} onClick={() => onMove(1)} />
-        <IconButton label="Remove step" icon={<span>×</span>} variant="ghost" size="sm" onClick={onRemove} />
-      </div>
+      <IconButton label="Remove step" icon={<span>×</span>} variant="ghost" size="sm" onClick={onRemove} />
     </div>
   )
 }
@@ -243,14 +423,8 @@ export default function RecipeEditorPage({ currentUser }) {
 
   const updateIngredient = (rowId, next) => setIngredients((list) => list.map((i) => (i.rowId === rowId ? next : i)))
   const removeIngredient = (rowId) => setIngredients((list) => list.filter((i) => i.rowId !== rowId))
-  const moveStep = (i, dir) =>
-    setSteps((list) => {
-      const j = i + dir
-      if (j < 0 || j >= list.length) return list
-      const next = [...list]
-      ;[next[i], next[j]] = [next[j], next[i]]
-      return next
-    })
+  const ingredientDrag = useDragReorder(setIngredients)
+  const stepDrag = useDragReorder(setSteps)
 
   const addTag = () => {
     const t = tagDraft.trim()
@@ -740,21 +914,29 @@ export default function RecipeEditorPage({ currentUser }) {
 
           <div style={{ display: 'grid', gridTemplateColumns: isDesktop ? '1fr 1fr' : '1fr', gap: isDesktop ? 'var(--spacing-6)' : 0, alignItems: 'start' }}>
             <div style={{ minWidth: 0 }}>
-              <div style={{ padding: isDesktop ? '0 0 var(--spacing-2)' : '0 var(--spacing-4)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 'var(--spacing-2)' }}>
+              <div style={{ padding: isDesktop ? '0 0 var(--spacing-2)' : '0 var(--spacing-4)', marginBottom: 'var(--spacing-2)' }}>
                 <span style={sectionLabelStyle}>Ingredients</span>
-                <Button label="Add ingredient" variant="secondary" size="sm" onClick={() => setIngredients([...ingredients, newIngredient()])} />
               </div>
               <Card padding={0} style={{ margin: isDesktop ? 0 : '0 var(--spacing-4)' }}>
                 {(() => {
                   // A row's section text starts a new heading; blank rows
                   // stay grouped under whichever heading came before them.
                   let currentSection = null
+                  // Distinct headings already typed elsewhere in this recipe
+                  // (not other recipes), offered as autocomplete below.
+                  const sectionOptions = [...new Set(ingredients.map((i) => i.section.trim()).filter(Boolean))]
                   return ingredients.map((ing, i) => {
                     const trimmed = ing.section.trim()
                     const startsNewSection = trimmed && trimmed !== currentSection
                     if (trimmed) currentSection = trimmed
+                    // The drop-target listeners live on this outer wrapper
+                    // (not just IngredientRow's own content box) so the
+                    // Divider/heading gap above each row is part of its drop
+                    // target too — otherwise hovering exactly over that thin
+                    // gap between rows silently fails to register a drop.
+                    const drag = ingredientDrag(i)
                     return (
-                      <div key={ing.rowId}>
+                      <div key={ing.rowId} {...drag.row}>
                         {i > 0 && <Divider />}
                         {startsNewSection && (
                           <div
@@ -770,34 +952,50 @@ export default function RecipeEditorPage({ currentUser }) {
                             {trimmed}
                           </div>
                         )}
-                        <IngredientRow ing={ing} categories={categories} onChange={(next) => updateIngredient(ing.rowId, next)} onRemove={() => removeIngredient(ing.rowId)} />
+                        <IngredientRow
+                          ing={ing}
+                          categories={categories}
+                          sectionOptions={sectionOptions}
+                          onChange={(next) => updateIngredient(ing.rowId, next)}
+                          onRemove={() => removeIngredient(ing.rowId)}
+                          drag={drag}
+                        />
                       </div>
                     )
                   })
                 })()}
+                <DragEndZone drag={ingredientDrag(ingredients.length)} />
               </Card>
+              <div style={{ padding: isDesktop ? 'var(--spacing-2) 0 0' : 'var(--spacing-2) var(--spacing-4) 0' }}>
+                <Button label="Add ingredient" variant="secondary" size="sm" onClick={() => setIngredients([...ingredients, newIngredient()])} />
+              </div>
             </div>
 
             <div style={{ minWidth: 0 }}>
-              <div style={{ padding: isDesktop ? '0 0 var(--spacing-2)' : 'var(--spacing-5) var(--spacing-4) 0', display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 'var(--spacing-2)' }}>
+              <div style={{ padding: isDesktop ? '0 0 var(--spacing-2)' : 'var(--spacing-5) var(--spacing-4) 0', marginBottom: 'var(--spacing-2)' }}>
                 <span style={sectionLabelStyle}>Steps</span>
+              </div>
+              <Card padding={0} style={{ margin: isDesktop ? 0 : '0 var(--spacing-4)' }}>
+                {steps.map((step, i) => {
+                  const drag = stepDrag(i)
+                  return (
+                    <div key={i} {...drag.row}>
+                      {i > 0 && <Divider />}
+                      <StepRow
+                        index={i}
+                        text={step}
+                        onChange={(v) => setSteps(steps.map((s, idx) => (idx === i ? v : s)))}
+                        onRemove={() => setSteps(steps.filter((_, idx) => idx !== i))}
+                        drag={drag}
+                      />
+                    </div>
+                  )
+                })}
+                <DragEndZone drag={stepDrag(steps.length)} />
+              </Card>
+              <div style={{ padding: isDesktop ? 'var(--spacing-2) 0 0' : 'var(--spacing-2) var(--spacing-4) var(--spacing-6)' }}>
                 <Button label="Add step" variant="secondary" size="sm" onClick={() => setSteps([...steps, ''])} />
               </div>
-              <Card padding={0} style={{ margin: isDesktop ? 0 : '0 var(--spacing-4) var(--spacing-6)' }}>
-                {steps.map((step, i) => (
-                  <div key={i}>
-                    {i > 0 && <Divider />}
-                    <StepRow
-                      index={i}
-                      text={step}
-                      total={steps.length}
-                      onChange={(v) => setSteps(steps.map((s, idx) => (idx === i ? v : s)))}
-                      onRemove={() => setSteps(steps.filter((_, idx) => idx !== i))}
-                      onMove={(dir) => moveStep(i, dir)}
-                    />
-                  </div>
-                ))}
-              </Card>
             </div>
           </div>
           </div>
