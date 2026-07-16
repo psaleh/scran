@@ -14,7 +14,9 @@ import { ToggleButton } from '@astryxdesign/core/ToggleButton'
 
 import { api } from '../api.js'
 import ExportRecipeDialog from '../components/ExportRecipeDialog.jsx'
+import ConfirmDialog from '../components/ConfirmDialog.jsx'
 import TagBadge from '../components/TagBadge.jsx'
+import { useToast } from '../components/Toaster.jsx'
 import { sectionLabelStyle, stepNumberStyle } from '../styles.js'
 import { useIsDesktop } from '../useIsDesktop.js'
 
@@ -73,16 +75,29 @@ function renderNoteText(text) {
 function NoteRow({ note, currentUser, onChanged }) {
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(note.text)
+  const [deleteOpen, setDeleteOpen] = useState(false)
+  const [deleteBusy, setDeleteBusy] = useState(false)
   const canModify = note.user_id === currentUser.id || currentUser.is_admin
+  const toast = useToast()
 
   const save = async () => {
-    await api(`/api/notes/${note.id}`, { method: 'PUT', body: { text: draft } })
-    setEditing(false)
-    onChanged()
+    try {
+      await api(`/api/notes/${note.id}`, { method: 'PUT', body: { text: draft } })
+      setEditing(false)
+      onChanged()
+    } catch (err) {
+      toast.error(err.message)
+    }
   }
   const remove = async () => {
-    await api(`/api/notes/${note.id}`, { method: 'DELETE' })
-    onChanged()
+    setDeleteBusy(true)
+    try {
+      await api(`/api/notes/${note.id}`, { method: 'DELETE' })
+      onChanged()
+    } catch (err) {
+      setDeleteBusy(false)
+      toast.error(err.message)
+    }
   }
 
   if (editing) {
@@ -116,21 +131,38 @@ function NoteRow({ note, currentUser, onChanged }) {
       {canModify && (
         <div style={{ display: 'flex', gap: 2, flexShrink: 0 }}>
           <IconButton label="Edit note" icon={<span>✎</span>} variant="ghost" size="sm" onClick={() => setEditing(true)} />
-          <IconButton label="Delete note" icon={<span>×</span>} variant="ghost" size="sm" clickAction={remove} />
+          <IconButton label="Delete note" icon={<span>×</span>} variant="ghost" size="sm" onClick={() => setDeleteOpen(true)} />
         </div>
       )}
+      <ConfirmDialog
+        isOpen={deleteOpen}
+        onOpenChange={setDeleteOpen}
+        title="Delete this note?"
+        message="This removes the note. This can't be undone."
+        confirmLabel="Delete note"
+        isBusy={deleteBusy}
+        onConfirm={async () => {
+          await remove()
+          setDeleteOpen(false)
+        }}
+      />
     </div>
   )
 }
 
 function NotesSection({ recipe, currentUser, onChanged }) {
   const [draft, setDraft] = useState('')
+  const toast = useToast()
 
   const save = async () => {
     if (!draft.trim()) return
-    await api(`/api/recipes/${recipe.id}/notes`, { method: 'POST', body: { text: draft.trim() } })
-    setDraft('')
-    onChanged()
+    try {
+      await api(`/api/recipes/${recipe.id}/notes`, { method: 'POST', body: { text: draft.trim() } })
+      setDraft('')
+      onChanged()
+    } catch (err) {
+      toast.error(err.message)
+    }
   }
 
   return (
@@ -174,6 +206,7 @@ export default function RecipeDetailPage({ currentUser }) {
   // Ingredient ids briefly shown with a ✓ after being sent to the list.
   const [addedIds, setAddedIds] = useState({})
   const [exportOpen, setExportOpen] = useState(false)
+  const toast = useToast()
 
   const load = () => {
     api(`/api/recipes/${id}`)
@@ -216,46 +249,61 @@ export default function RecipeDetailPage({ currentUser }) {
   }
 
   const addToList = async (ingredientId) => {
-    await api('/api/shopping/from-recipe', {
-      method: 'POST',
-      body: { recipe_id: recipe.id, ingredient_ids: [ingredientId] },
-    })
-    flashAdded([ingredientId])
+    try {
+      await api('/api/shopping/from-recipe', {
+        method: 'POST',
+        body: { recipe_id: recipe.id, ingredient_ids: [ingredientId] },
+      })
+      flashAdded([ingredientId])
+      toast.success('Added to list')
+    } catch (err) {
+      toast.error(err.message)
+    }
   }
 
   const addAllToList = async () => {
-    await api('/api/shopping/from-recipe', {
-      method: 'POST',
-      body: { recipe_id: recipe.id },
-    })
-    flashAdded(recipe.ingredients.map((i) => i.id))
+    try {
+      await api('/api/shopping/from-recipe', {
+        method: 'POST',
+        body: { recipe_id: recipe.id },
+      })
+      flashAdded(recipe.ingredients.map((i) => i.id))
+      toast.success(`Added ${recipe.ingredients.length} items`)
+    } catch (err) {
+      toast.error(err.message)
+    }
   }
 
   // PUT /api/recipes/{id} replaces the whole recipe, so this must resend the
   // current fields (not just status) or ingredients/steps would be wiped.
   const publish = async () => {
-    await api(`/api/recipes/${recipe.id}`, {
-      method: 'PUT',
-      body: {
-        title: recipe.title,
-        description: recipe.description,
-        servings: recipe.servings,
-        tags: recipe.tags,
-        source_url: recipe.source_url,
-        status: 'published',
-        ingredients: recipe.ingredients.map((i) => ({
-          name: i.name,
-          amount: i.amount,
-          unit: i.unit,
-          note: i.note,
-          scalable: i.scalable,
-          category_id: i.category_id,
-          section: i.section,
-        })),
-        steps: recipe.steps,
-      },
-    })
-    load()
+    try {
+      await api(`/api/recipes/${recipe.id}`, {
+        method: 'PUT',
+        body: {
+          title: recipe.title,
+          description: recipe.description,
+          servings: recipe.servings,
+          tags: recipe.tags,
+          source_url: recipe.source_url,
+          status: 'published',
+          ingredients: recipe.ingredients.map((i) => ({
+            name: i.name,
+            amount: i.amount,
+            unit: i.unit,
+            note: i.note,
+            scalable: i.scalable,
+            category_id: i.category_id,
+            section: i.section,
+          })),
+          steps: recipe.steps,
+        },
+      })
+      load()
+      toast.success('Published')
+    } catch (err) {
+      toast.error(err.message)
+    }
   }
 
   const leftColumn = (

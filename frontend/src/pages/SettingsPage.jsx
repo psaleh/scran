@@ -12,6 +12,8 @@ import { TabList, Tab } from '@astryxdesign/core/TabList'
 import { TextInput } from '@astryxdesign/core/TextInput'
 
 import { api } from '../api.js'
+import ConfirmDialog from '../components/ConfirmDialog.jsx'
+import { useToast } from '../components/Toaster.jsx'
 import { useIsDesktop } from '../useIsDesktop.js'
 
 // Shared bits ---------------------------------------------------------------
@@ -44,6 +46,9 @@ function AiProfilesSection() {
   const [error, setError] = useState('')
   const [testingId, setTestingId] = useState(null)
   const [testResults, setTestResults] = useState({}) // profile id → {ok, message}
+  const [deleteTarget, setDeleteTarget] = useState(null) // profile being deleted
+  const [deleteBusy, setDeleteBusy] = useState(false)
+  const toast = useToast()
 
   const load = () => api('/api/ai-profiles').then(setProfiles).catch((e) => setError(e.message))
   useEffect(() => { load() }, [])
@@ -68,12 +73,24 @@ function AiProfilesSection() {
   }
 
   const activate = async (id) => {
-    await api(`/api/ai-profiles/${id}/activate`, { method: 'POST' })
-    load()
+    try {
+      await api(`/api/ai-profiles/${id}/activate`, { method: 'POST' })
+      load()
+    } catch (e) {
+      toast.error(e.message)
+    }
   }
-  const remove = async (id) => {
-    await api(`/api/ai-profiles/${id}`, { method: 'DELETE' })
-    load()
+  const remove = async () => {
+    setDeleteBusy(true)
+    try {
+      await api(`/api/ai-profiles/${deleteTarget.id}`, { method: 'DELETE' })
+      setDeleteTarget(null)
+      load()
+    } catch (e) {
+      toast.error(e.message)
+    } finally {
+      setDeleteBusy(false)
+    }
   }
 
   const test = async (id) => {
@@ -128,7 +145,7 @@ function AiProfilesSection() {
                   clickAction={() => test(p.id)}
                 />
                 <IconButton label="Edit profile" icon={<span>✎</span>} variant="ghost" size="sm" onClick={() => setEditing({ ...p, api_key: '' })} />
-                <IconButton label="Delete profile" icon={<span>×</span>} variant="ghost" size="sm" clickAction={() => remove(p.id)} />
+                <IconButton label="Delete profile" icon={<span>×</span>} variant="ghost" size="sm" onClick={() => setDeleteTarget(p)} />
               </div>
               {testResults[p.id] && (
                 <div style={{ padding: '0 var(--spacing-4) var(--spacing-3)' }}>
@@ -173,6 +190,16 @@ function AiProfilesSection() {
           </DialogFrame>
         )}
       </Dialog>
+
+      <ConfirmDialog
+        isOpen={deleteTarget !== null}
+        onOpenChange={(open) => { if (!open) setDeleteTarget(null) }}
+        title="Delete this AI profile?"
+        message={deleteTarget ? `This removes "${deleteTarget.name}". This can't be undone.` : ''}
+        confirmLabel="Delete profile"
+        isBusy={deleteBusy}
+        onConfirm={remove}
+      />
     </div>
   )
 }
@@ -185,6 +212,9 @@ function StoresSection() {
   const [selectedId, setSelectedId] = useState(null)
   const [newStore, setNewStore] = useState('')
   const [error, setError] = useState('')
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false)
+  const [deleteBusy, setDeleteBusy] = useState(false)
+  const toast = useToast()
 
   const load = async () => {
     const [s, c] = await Promise.all([api('/api/stores'), api('/api/categories')])
@@ -210,10 +240,18 @@ function StoresSection() {
     }
   }
 
-  const removeStore = async (id) => {
-    await api(`/api/stores/${id}`, { method: 'DELETE' })
-    setSelectedId(null)
-    load()
+  const removeStore = async () => {
+    setDeleteBusy(true)
+    try {
+      await api(`/api/stores/${selected.id}`, { method: 'DELETE' })
+      setSelectedId(null)
+      setDeleteConfirmOpen(false)
+      load()
+    } catch (e) {
+      toast.error(e.message)
+    } finally {
+      setDeleteBusy(false)
+    }
   }
 
   const move = async (index, dir) => {
@@ -221,12 +259,18 @@ function StoresSection() {
     const j = index + dir
     if (j < 0 || j >= order.length) return
     ;[order[index], order[j]] = [order[j], order[index]]
-    // Optimistic local update, then persist.
+    const previous = stores
+    // Optimistic local update, then persist; roll back on failure.
     setStores((list) => list.map((s) => (s.id === selected.id ? { ...s, category_order: order } : s)))
-    await api(`/api/stores/${selected.id}`, {
-      method: 'PUT',
-      body: { name: selected.name, category_order: order },
-    })
+    try {
+      await api(`/api/stores/${selected.id}`, {
+        method: 'PUT',
+        body: { name: selected.name, category_order: order },
+      })
+    } catch (e) {
+      setStores(previous)
+      toast.error(e.message)
+    }
   }
 
   return (
@@ -250,7 +294,7 @@ function StoresSection() {
             <span style={hintStyle}>
               Walking route — reorder to match {selected.name}'s layout
             </span>
-            <Button label="Delete store" variant="destructive" size="sm" clickAction={() => removeStore(selected.id)} />
+            <Button label="Delete store" variant="destructive" size="sm" onClick={() => setDeleteConfirmOpen(true)} />
           </div>
           <Card padding={0}>
             {selected.category_order.map((catId, i) => (
@@ -272,6 +316,16 @@ function StoresSection() {
       {stores.length === 0 && (
         <span style={hintStyle}>No stores yet. Add one to give the shopping list a walking-route order.</span>
       )}
+
+      <ConfirmDialog
+        isOpen={deleteConfirmOpen}
+        onOpenChange={setDeleteConfirmOpen}
+        title="Delete this store?"
+        message={selected ? `This removes "${selected.name}" and its walking-route order. This can't be undone.` : ''}
+        confirmLabel="Delete store"
+        isBusy={deleteBusy}
+        onConfirm={removeStore}
+      />
     </div>
   )
 }
@@ -284,6 +338,7 @@ function CategoriesSection() {
   const [renamingId, setRenamingId] = useState(null)
   const [renameText, setRenameText] = useState('')
   const [error, setError] = useState('')
+  const [deleteTarget, setDeleteTarget] = useState(null) // category being deleted
 
   const load = () => api('/api/categories').then(setCategories).catch((e) => setError(e.message))
   useEffect(() => { load() }, [])
@@ -307,7 +362,10 @@ function CategoriesSection() {
     await api(`/api/categories/${renamingId}`, { method: 'PUT', body: { name: renameText.trim() } })
     setRenamingId(null)
   })
-  const remove = (id) => run(() => api(`/api/categories/${id}`, { method: 'DELETE' }))
+  const remove = () => run(async () => {
+    await api(`/api/categories/${deleteTarget.id}`, { method: 'DELETE' })
+    setDeleteTarget(null)
+  })
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-3)' }}>
@@ -333,7 +391,7 @@ function CategoriesSection() {
                 <>
                   <span style={rowTextStyle}>{c.name}</span>
                   <IconButton label="Rename category" icon={<span>✎</span>} variant="ghost" size="sm" onClick={() => { setRenamingId(c.id); setRenameText(c.name) }} />
-                  <IconButton label="Delete category" icon={<span>×</span>} variant="ghost" size="sm" clickAction={() => remove(c.id)} />
+                  <IconButton label="Delete category" icon={<span>×</span>} variant="ghost" size="sm" onClick={() => setDeleteTarget(c)} />
                 </>
               )}
             </div>
@@ -346,6 +404,15 @@ function CategoriesSection() {
         </div>
         <Button label="Add" variant="secondary" clickAction={add} isDisabled={!newName.trim()} />
       </div>
+
+      <ConfirmDialog
+        isOpen={deleteTarget !== null}
+        onOpenChange={(open) => { if (!open) setDeleteTarget(null) }}
+        title="Delete this category?"
+        message={deleteTarget ? `Items in "${deleteTarget.name}" move to Uncategorised. This can't be undone.` : ''}
+        confirmLabel="Delete category"
+        onConfirm={remove}
+      />
     </div>
   )
 }
@@ -359,6 +426,8 @@ function UsersSection({ currentUser }) {
   const [resetting, setResetting] = useState(null) // user being password-reset
   const [resetPassword, setResetPassword] = useState('')
   const [error, setError] = useState('')
+  const [deleteTarget, setDeleteTarget] = useState(null) // user being deleted
+  const [adminToggleTarget, setAdminToggleTarget] = useState(null) // user whose admin role is changing
 
   const load = () => api('/api/users').then(setUsers).catch((e) => setError(e.message))
   useEffect(() => { load() }, [])
@@ -383,8 +452,14 @@ function UsersSection({ currentUser }) {
     setResetting(null)
     setResetPassword('')
   })
-  const toggleAdmin = (u) => run(() => api(`/api/users/${u.id}`, { method: 'PATCH', body: { is_admin: !u.is_admin } }))
-  const remove = (u) => run(() => api(`/api/users/${u.id}`, { method: 'DELETE' }))
+  const toggleAdmin = () => run(async () => {
+    await api(`/api/users/${adminToggleTarget.id}`, { method: 'PATCH', body: { is_admin: !adminToggleTarget.is_admin } })
+    setAdminToggleTarget(null)
+  })
+  const remove = () => run(async () => {
+    await api(`/api/users/${deleteTarget.id}`, { method: 'DELETE' })
+    setDeleteTarget(null)
+  })
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-3)' }}>
@@ -400,10 +475,10 @@ function UsersSection({ currentUser }) {
                 {u.id === currentUser.id && <span style={{ color: 'var(--color-text-secondary)' }}> (you)</span>}
               </span>
               {u.is_admin ? <Badge label="Admin" variant="purple" /> : null}
-              <IconButton label={u.is_admin ? 'Remove admin role' : 'Make admin'} icon={<span>{u.is_admin ? '☆' : '★'}</span>} variant="ghost" size="sm" clickAction={() => toggleAdmin(u)} />
+              <IconButton label={u.is_admin ? 'Remove admin role' : 'Make admin'} icon={<span>{u.is_admin ? '☆' : '★'}</span>} variant="ghost" size="sm" onClick={() => setAdminToggleTarget(u)} />
               <IconButton label="Reset password" icon={<span>⚿</span>} variant="ghost" size="sm" onClick={() => { setResetting(u); setResetPassword('') }} />
               {u.id !== currentUser.id && (
-                <IconButton label="Delete user" icon={<span>×</span>} variant="ghost" size="sm" clickAction={() => remove(u)} />
+                <IconButton label="Delete user" icon={<span>×</span>} variant="ghost" size="sm" onClick={() => setDeleteTarget(u)} />
               )}
             </div>
           </div>
@@ -436,6 +511,29 @@ function UsersSection({ currentUser }) {
           </DialogFrame>
         )}
       </Dialog>
+
+      <ConfirmDialog
+        isOpen={deleteTarget !== null}
+        onOpenChange={(open) => { if (!open) setDeleteTarget(null) }}
+        title="Delete this user?"
+        message={deleteTarget ? `This removes "${deleteTarget.username}"'s account. This can't be undone.` : ''}
+        confirmLabel="Delete user"
+        onConfirm={remove}
+      />
+
+      <ConfirmDialog
+        isOpen={adminToggleTarget !== null}
+        onOpenChange={(open) => { if (!open) setAdminToggleTarget(null) }}
+        title={adminToggleTarget?.is_admin ? 'Remove admin role?' : 'Make this user an admin?'}
+        message={
+          adminToggleTarget?.is_admin
+            ? `"${adminToggleTarget?.username}" will lose access to Users, deleting recipes, and other admin-only actions.`
+            : `"${adminToggleTarget?.username}" will gain full admin access, including managing users.`
+        }
+        confirmLabel={adminToggleTarget?.is_admin ? 'Remove admin role' : 'Make admin'}
+        variant={adminToggleTarget?.is_admin ? 'destructive' : 'primary'}
+        onConfirm={toggleAdmin}
+      />
     </div>
   )
 }

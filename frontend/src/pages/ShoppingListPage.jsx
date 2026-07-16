@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Badge } from '@astryxdesign/core/Badge'
+import { Banner } from '@astryxdesign/core/Banner'
 import { Button } from '@astryxdesign/core/Button'
 import { Card } from '@astryxdesign/core/Card'
 import { Dialog } from '@astryxdesign/core/Dialog'
@@ -12,6 +13,8 @@ import { TextInput } from '@astryxdesign/core/TextInput'
 
 import { api } from '../api.js'
 import TagBadge from '../components/TagBadge.jsx'
+import ConfirmDialog from '../components/ConfirmDialog.jsx'
+import { useToast } from '../components/Toaster.jsx'
 import { sectionLabelStyle } from '../styles.js'
 
 const SWIPE_THRESHOLD = 140
@@ -163,9 +166,15 @@ function CategorySection({ label, items, onToggle, onRemove, onRecategorise }) {
  * tags, adjacent duplicate grouping, check-off, manual add w/ autocomplete. */
 export default function ShoppingListPage() {
   const [items, setItems] = useState(null)
+  const [listError, setListError] = useState(null)
   const [categories, setCategories] = useState([])
   const [stores, setStores] = useState([])
   const [storeId, setStoreId] = useState(() => localStorage.getItem('scran.store') || '')
+  const toast = useToast()
+
+  // Clear-all/Clear-completed confirmation: null = closed, else which kind.
+  const [clearConfirm, setClearConfirm] = useState(null)
+  const [clearBusy, setClearBusy] = useState(false)
 
   // Add bar state
   const [draft, setDraft] = useState('')
@@ -180,7 +189,12 @@ export default function ShoppingListPage() {
   const [recatItem, setRecatItem] = useState(null)
 
   useEffect(() => {
-    api('/api/shopping').then(setItems).catch(() => setItems([]))
+    api('/api/shopping')
+      .then(setItems)
+      .catch((err) => {
+        setListError(err.message || 'Failed to load the shopping list.')
+        setItems([])
+      })
     api('/api/categories').then(setCategories).catch(() => {})
     api('/api/stores').then(setStores).catch(() => {})
   }, [])
@@ -208,48 +222,78 @@ export default function ShoppingListPage() {
   const addItem = async () => {
     const name = draft.trim()
     if (!name) return
-    const created = await api('/api/shopping', {
-      method: 'POST',
-      body: {
-        name,
-        amount: draftAmount === '' ? null : Number(draftAmount) || null,
-        unit: draftUnit.trim() || null,
-        category_id: draftCategory,
-      },
-    })
-    setItems((list) => [...list, created])
-    setDraft('')
-    setDraftAmount('')
-    setDraftUnit('')
-    setDraftCategory(null)
-    setSuggestOpen(false)
+    try {
+      const created = await api('/api/shopping', {
+        method: 'POST',
+        body: {
+          name,
+          amount: draftAmount === '' ? null : Number(draftAmount) || null,
+          unit: draftUnit.trim() || null,
+          category_id: draftCategory,
+        },
+      })
+      setItems((list) => [...list, created])
+      setDraft('')
+      setDraftAmount('')
+      setDraftUnit('')
+      setDraftCategory(null)
+      setSuggestOpen(false)
+    } catch (err) {
+      toast.error(err.message)
+    }
   }
 
   const toggleItem = async (item) => {
-    // Optimistic: flip locally, then persist.
+    // Optimistic: flip locally, then persist; roll back on failure.
     setItems((list) => list.map((i) => (i.id === item.id ? { ...i, checked: !i.checked } : i)))
-    await api(`/api/shopping/${item.id}`, { method: 'PATCH', body: { checked: !item.checked } })
+    try {
+      await api(`/api/shopping/${item.id}`, { method: 'PATCH', body: { checked: !item.checked } })
+    } catch (err) {
+      setItems((list) => list.map((i) => (i.id === item.id ? { ...i, checked: item.checked } : i)))
+      toast.error(err.message)
+    }
   }
 
   const removeItem = async (item) => {
+    const previous = items
     setItems((list) => list.filter((i) => i.id !== item.id))
-    await api(`/api/shopping/${item.id}`, { method: 'DELETE' })
+    try {
+      await api(`/api/shopping/${item.id}`, { method: 'DELETE' })
+    } catch (err) {
+      setItems(previous)
+      toast.error(err.message)
+    }
   }
 
   const recategorise = async (item, categoryId) => {
     setRecatItem(null)
-    // The server also writes the choice back to ingredient_lookup so it
-    // sticks for future saves (spec §3.6.4).
-    const updated = await api(`/api/shopping/${item.id}`, {
-      method: 'PATCH',
-      body: { set_category: true, category_id: categoryId },
-    })
-    setItems((list) => list.map((i) => (i.id === item.id ? updated : i)))
+    try {
+      // The server also writes the choice back to ingredient_lookup so it
+      // sticks for future saves (spec §3.6.4).
+      const updated = await api(`/api/shopping/${item.id}`, {
+        method: 'PATCH',
+        body: { set_category: true, category_id: categoryId },
+      })
+      setItems((list) => list.map((i) => (i.id === item.id ? updated : i)))
+    } catch (err) {
+      toast.error(err.message)
+    }
   }
 
   const clear = async (checkedOnly) => {
-    await api(`/api/shopping/clear?checked_only=${checkedOnly}`, { method: 'POST' })
-    setItems((list) => (checkedOnly ? list.filter((i) => !i.checked) : []))
+    const previous = items
+    setClearBusy(true)
+    try {
+      await api(`/api/shopping/clear?checked_only=${checkedOnly}`, { method: 'POST' })
+      setItems((list) => (checkedOnly ? list.filter((i) => !i.checked) : []))
+      toast.success('List cleared')
+    } catch (err) {
+      setItems(previous)
+      toast.error(err.message)
+    } finally {
+      setClearBusy(false)
+      setClearConfirm(null)
+    }
   }
 
   if (items === null) {
@@ -355,7 +399,11 @@ export default function ShoppingListPage() {
 
         {/* List */}
         <div style={{ flex: 1, overflowY: 'auto', paddingBottom: 'var(--spacing-6)' }}>
-          {items.length === 0 ? (
+          {listError ? (
+            <div style={{ padding: 'var(--spacing-4)' }}>
+              <Banner status="error" title="Couldn't load your shopping list" description={listError} />
+            </div>
+          ) : items.length === 0 ? (
             <div style={{ padding: 'var(--spacing-8) var(--spacing-4)' }}>
               <EmptyState
                 title="List is empty"
@@ -404,13 +452,32 @@ export default function ShoppingListPage() {
         {items.length > 0 && (
           <div style={{ display: 'flex', gap: 'var(--spacing-2)', padding: 'var(--spacing-3) var(--spacing-4)', background: 'var(--color-background-surface)', borderTop: '1px solid var(--color-border)', flexShrink: 0 }}>
             <div style={{ flex: 1 }}>
-              <Button label={`Clear completed${checkedCount ? ` (${checkedCount})` : ''}`} variant="secondary" clickAction={() => clear(true)} isDisabled={checkedCount === 0} />
+              <Button
+                label={`Clear completed${checkedCount ? ` (${checkedCount})` : ''}`}
+                variant="secondary"
+                clickAction={() => setClearConfirm('checked')}
+                isDisabled={checkedCount === 0}
+              />
             </div>
             <div style={{ flex: 1 }}>
-              <Button label="Clear all" variant="destructive" clickAction={() => clear(false)} />
+              <Button label="Clear all" variant="destructive" clickAction={() => setClearConfirm('all')} />
             </div>
           </div>
         )}
+
+        <ConfirmDialog
+          isOpen={clearConfirm !== null}
+          onOpenChange={(open) => { if (!open) setClearConfirm(null) }}
+          title={clearConfirm === 'all' ? 'Clear entire list?' : 'Clear completed items?'}
+          message={
+            clearConfirm === 'all'
+              ? "This removes every item on the shopping list. This can't be undone."
+              : 'This removes all checked-off items from the list.'
+          }
+          confirmLabel={clearConfirm === 'all' ? 'Clear all' : 'Clear completed'}
+          isBusy={clearBusy}
+          onConfirm={() => clear(clearConfirm === 'checked')}
+        />
       </div>
     </div>
   )

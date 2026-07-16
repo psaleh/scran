@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { BrowserRouter, Route, Routes } from 'react-router-dom'
 import { Center } from '@astryxdesign/core/Center'
 import { Spinner } from '@astryxdesign/core/Spinner'
+import { LayerProvider } from '@astryxdesign/core/Layer'
 
 import { api } from './api.js'
 import AppNav from './components/AppNav.jsx'
@@ -18,21 +19,26 @@ import { useIsDesktop } from './useIsDesktop.js'
 function Shell({ user, onLogout }) {
   const isDesktop = useIsDesktop()
   return (
-    <div style={{ height: '100dvh', display: 'flex', flexDirection: 'column', minHeight: 0, background: 'var(--color-background-body)' }}>
-      {isDesktop && <AppNav onLogout={onLogout} />}
-      <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
-        <Routes>
-          <Route path="/" element={<BrowsePage />} />
-          <Route path="/recipes/new" element={<RecipeEditorPage currentUser={user} />} />
-          <Route path="/recipes/:id" element={<RecipeDetailPage currentUser={user} />} />
-          <Route path="/recipes/:id/edit" element={<RecipeEditorPage currentUser={user} />} />
-          <Route path="/shopping" element={<ShoppingListPage />} />
-          <Route path="/inbox" element={<InboxPage />} />
-          <Route path="/settings" element={<SettingsPage currentUser={user} />} />
-        </Routes>
+    // Mobile's bottom tab bar sits in normal flow at the bottom of the
+    // screen, so the toast viewport needs a bottom inset to clear it
+    // (desktop's nav is a top bar, so a small inset is enough there).
+    <LayerProvider toast={{ position: 'bottomEnd', inset: { bottom: isDesktop ? 24 : 76 } }}>
+      <div style={{ height: '100dvh', display: 'flex', flexDirection: 'column', minHeight: 0, background: 'var(--color-background-body)' }}>
+        {isDesktop && <AppNav onLogout={onLogout} />}
+        <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+          <Routes>
+            <Route path="/" element={<BrowsePage />} />
+            <Route path="/recipes/new" element={<RecipeEditorPage currentUser={user} />} />
+            <Route path="/recipes/:id" element={<RecipeDetailPage currentUser={user} />} />
+            <Route path="/recipes/:id/edit" element={<RecipeEditorPage currentUser={user} />} />
+            <Route path="/shopping" element={<ShoppingListPage />} />
+            <Route path="/inbox" element={<InboxPage />} />
+            <Route path="/settings" element={<SettingsPage currentUser={user} />} />
+          </Routes>
+        </div>
+        {!isDesktop && <AppNav onLogout={onLogout} />}
       </div>
-      {!isDesktop && <AppNav onLogout={onLogout} />}
-    </div>
+    </LayerProvider>
   )
 }
 

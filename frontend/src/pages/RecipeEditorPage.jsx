@@ -19,6 +19,8 @@ import { DropdownMenu } from '@astryxdesign/core/DropdownMenu'
 import { api, upload } from '../api.js'
 import { sectionLabelStyle, stepNumberStyle } from '../styles.js'
 import { useIsDesktop } from '../useIsDesktop.js'
+import ConfirmDialog from '../components/ConfirmDialog.jsx'
+import { useToast } from '../components/Toaster.jsx'
 
 let nextRowId = 1
 const newIngredient = () => ({ rowId: nextRowId++, amount: '', unit: '', name: '', note: '', category_id: null, scalable: true, section: '' })
@@ -386,7 +388,24 @@ export default function RecipeEditorPage({ currentUser }) {
   // button should appear immediately — not only after a save + reload.
   const [hasPageText, setHasPageText] = useState(Boolean(prefill?.source_page_text))
   const [tidyBusy, setTidyBusy] = useState(false)
+  const [saveBusy, setSaveBusy] = useState(false)
+  const [dirty, setDirty] = useState(false)
+  const [leaveDialogOpen, setLeaveDialogOpen] = useState(false)
   const fileInput = useRef(null)
+  const toast = useToast()
+
+  // Marks the form dirty on any field change made once the recipe has
+  // finished loading (or immediately, for a brand-new recipe) — skips the
+  // setState calls the initial load itself makes.
+  const skipDirtyRef = useRef(!loaded)
+  useEffect(() => {
+    if (skipDirtyRef.current) {
+      if (loaded) skipDirtyRef.current = false
+      return
+    }
+    setDirty(true)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [title, description, servings, tags, sourceUrl, ingredients, steps, photoFile, chosenImageUrl])
 
   useEffect(() => {
     api('/api/categories').then(setCategories).catch(() => {})
@@ -549,15 +568,21 @@ export default function RecipeEditorPage({ currentUser }) {
   }
 
   const save = async (saveStatus) => {
-    if (!validate()) return
+    // Guards against a rapid double-click on Save/Publish firing two POSTs
+    // and creating duplicate recipes.
+    if (!validate() || saveBusy) return
+    setSaveBusy(true)
     try {
       const body = buildBody(saveStatus)
       const saved = id === undefined
         ? await api('/api/recipes', { method: 'POST', body })
         : await api(`/api/recipes/${id}`, { method: 'PUT', body })
+      setDirty(false)
       await finishSave(saved)
+      toast.success(saveStatus === 'published' ? 'Published' : 'Saved')
     } catch (err) {
       setError(err.message)
+      setSaveBusy(false)
     }
   }
 
@@ -600,15 +625,19 @@ export default function RecipeEditorPage({ currentUser }) {
   // "Save as new version": the original recipe stays untouched; the edits in
   // the form become a new linked recipe in the same version group.
   const saveAsVersion = async () => {
-    if (!validate()) return
+    if (!validate() || saveBusy) return
+    setSaveBusy(true)
     try {
       const body = { ...buildBody(status), version_label: versionLabel }
       const saved = await api(`/api/recipes/${id}/versions`, { method: 'POST', body })
       setVersionDialogOpen(false)
+      setDirty(false)
       await finishSave(saved)
+      toast.success('Saved')
     } catch (err) {
       setVersionDialogOpen(false)
       setError(err.message)
+      setSaveBusy(false)
     }
   }
 
@@ -637,7 +666,12 @@ export default function RecipeEditorPage({ currentUser }) {
           gap: 'var(--spacing-2)',
         }}
       >
-        <IconButton label="Back" icon={<span>‹</span>} variant="ghost" onClick={() => navigate(-1)} />
+        <IconButton
+          label="Back"
+          icon={<span>‹</span>}
+          variant="ghost"
+          onClick={() => (dirty ? setLeaveDialogOpen(true) : navigate(-1))}
+        />
         <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--spacing-2)' }}>
           {/* Delete/Save-as-version are secondary actions — on mobile they'd
               push "Save draft"/"Publish" off-screen, so they collapse into an
@@ -658,12 +692,32 @@ export default function RecipeEditorPage({ currentUser }) {
             <Button label="Delete…" variant="destructive" size="sm" onClick={() => setDeleteDialogOpen(true)} />
           )}
           {id !== undefined && isDesktop && (
-            <Button label="Save as version…" variant="ghost" size="sm" onClick={() => setVersionDialogOpen(true)} />
+            <Button label="Save as version…" variant="ghost" size="sm" isDisabled={saveBusy} onClick={() => setVersionDialogOpen(true)} />
           )}
-          <Button label="Save draft" variant="secondary" size="sm" clickAction={() => save('draft')} />
-          <Button label={status === 'published' ? 'Save' : 'Publish'} variant="primary" size="sm" clickAction={() => save('published')} />
+          <Button label="Save draft" variant="secondary" size="sm" isDisabled={saveBusy} clickAction={() => save('draft')} />
+          <Button
+            label={status === 'published' ? 'Save' : 'Publish'}
+            variant="primary"
+            size="sm"
+            isLoading={saveBusy}
+            clickAction={() => save('published')}
+          />
         </div>
       </div>
+
+      {/* Unsaved-changes guard: only the editor's own Back button prompts —
+          global nav/browser back are left alone (spec: keep it simple). */}
+      <ConfirmDialog
+        isOpen={leaveDialogOpen}
+        onOpenChange={setLeaveDialogOpen}
+        title="Discard unsaved changes?"
+        message="You have unsaved edits to this recipe. Leaving now will discard them."
+        confirmLabel="Discard changes"
+        onConfirm={() => {
+          setLeaveDialogOpen(false)
+          navigate(-1)
+        }}
+      />
 
       {/* "Save as new version" label prompt */}
       <Dialog isOpen={versionDialogOpen} onOpenChange={setVersionDialogOpen} purpose="form">
@@ -684,29 +738,22 @@ export default function RecipeEditorPage({ currentUser }) {
             isOptional
           />
           <div style={{ display: 'flex', gap: 'var(--spacing-2)', justifyContent: 'flex-end' }}>
-            <Button label="Cancel" variant="ghost" onClick={() => setVersionDialogOpen(false)} />
-            <Button label="Save version" variant="primary" clickAction={saveAsVersion} />
+            <Button label="Cancel" variant="ghost" onClick={() => setVersionDialogOpen(false)} isDisabled={saveBusy} />
+            <Button label="Save version" variant="primary" clickAction={saveAsVersion} isLoading={saveBusy} />
           </div>
         </div>
       </Dialog>
 
       {/* Delete confirmation: irreversible, so require an explicit confirm click */}
-      <Dialog isOpen={deleteDialogOpen} onOpenChange={setDeleteDialogOpen} purpose="confirmation">
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-4)', padding: 'var(--spacing-2)' }}>
-          <div>
-            <h2 style={{ margin: 0, fontSize: 'var(--text-heading-2-size)', fontWeight: 'var(--text-heading-2-weight)', color: 'var(--color-text-primary)' }}>
-              Delete this recipe?
-            </h2>
-            <p style={{ margin: 'var(--spacing-1) 0 0', fontSize: 'var(--font-size-base)', color: 'var(--color-text-secondary)' }}>
-              This removes the recipe, its photo, and its shopping list history. This can't be undone.
-            </p>
-          </div>
-          <div style={{ display: 'flex', gap: 'var(--spacing-2)', justifyContent: 'flex-end' }}>
-            <Button label="Cancel" variant="ghost" onClick={() => setDeleteDialogOpen(false)} isDisabled={deleteBusy} />
-            <Button label="Delete recipe" variant="destructive" clickAction={deleteRecipe} isLoading={deleteBusy} />
-          </div>
-        </div>
-      </Dialog>
+      <ConfirmDialog
+        isOpen={deleteDialogOpen}
+        onOpenChange={setDeleteDialogOpen}
+        title="Delete this recipe?"
+        message="This removes the recipe, its photo, and its shopping list history. This can't be undone."
+        confirmLabel="Delete recipe"
+        isBusy={deleteBusy}
+        onConfirm={deleteRecipe}
+      />
 
       <div style={{ flex: 1, overflowY: 'auto' }}>
         <div
