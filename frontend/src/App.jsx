@@ -49,7 +49,7 @@ export default function App() {
 
   if (user === undefined) {
     return (
-      <Center axis="both" style={{ minHeight: '100vh' }}>
+      <Center axis="both" style={{ minHeight: '100dvh' }}>
         <Spinner size="lg" label="Loading" />
       </Center>
     )

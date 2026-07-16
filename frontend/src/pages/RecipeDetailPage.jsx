@@ -264,7 +264,7 @@ export default function RecipeDetailPage({ currentUser }) {
       <div style={{ position: 'relative', flexShrink: 0 }}>
         <div
           style={{
-            height: isDesktop ? 260 : 220,
+            height: recipe.photo_path ? (isDesktop ? 260 : 220) : (isDesktop ? 72 : 56),
             width: '100%',
             borderRadius: isDesktop ? 'var(--radius-container)' : 0,
             overflow: 'hidden',
@@ -290,11 +290,18 @@ export default function RecipeDetailPage({ currentUser }) {
       </div>
 
       <div style={{ padding: isDesktop ? 'var(--spacing-4) 0' : 'var(--spacing-4)', display: 'flex', flexDirection: 'column', gap: 'var(--spacing-3)' }}>
-        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 'var(--spacing-3)' }}>
-          <h1 style={{ margin: 0, fontSize: 'var(--text-heading-1-size)', fontWeight: 'var(--text-heading-1-weight)', color: 'var(--color-text-primary)' }}>
+        <div style={{ display: 'flex', flexDirection: isDesktop ? 'row' : 'column', alignItems: isDesktop ? 'flex-start' : 'stretch', justifyContent: 'space-between', gap: 'var(--spacing-3)' }}>
+          <h1
+            style={{
+              margin: 0,
+              fontSize: isDesktop ? 'var(--text-heading-1-size)' : 'var(--text-heading-2-size)',
+              fontWeight: 'var(--text-heading-1-weight)',
+              color: 'var(--color-text-primary)',
+            }}
+          >
             {recipe.title}
           </h1>
-          <div style={{ display: 'flex', gap: 'var(--spacing-2)', flexShrink: 0 }}>
+          <div style={{ display: 'flex', gap: 'var(--spacing-2)', flexWrap: 'wrap', flexShrink: 0 }}>
             {recipe.status === 'draft' && (
               <Button label="Publish" variant="primary" size="sm" clickAction={publish} />
             )}
@@ -437,7 +444,7 @@ export default function RecipeDetailPage({ currentUser }) {
     return (
       <div style={{ flex: 1, overflowY: 'auto', padding: 'var(--spacing-6)' }}>
         <div style={{ maxWidth: 1200, margin: '0 auto', display: 'grid', gridTemplateColumns: '420px 1fr', gap: 'var(--spacing-8)', alignItems: 'start' }}>
-          <div style={{ position: 'sticky', top: 0, display: 'flex', flexDirection: 'column' }}>{leftColumn}</div>
+          <div style={{ position: 'sticky', top: 0, display: 'flex', flexDirection: 'column', maxHeight: 'calc(100dvh - 140px)', overflowY: 'auto' }}>{leftColumn}</div>
           <div style={{ maxWidth: 640 }}>{rightColumn}</div>
         </div>
         {exportDialog}

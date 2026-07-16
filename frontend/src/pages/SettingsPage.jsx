@@ -498,11 +498,13 @@ export default function SettingsPage({ currentUser }) {
           <h1 style={{ margin: '0 0 var(--spacing-3)', fontSize: 'var(--text-heading-1-size)', fontWeight: 'var(--text-heading-1-weight)', color: 'var(--color-text-primary)' }}>
             Settings
           </h1>
-          <TabList value={section.value} onChange={setTab}>
-            {sections.map((s) => (
-              <Tab key={s.value} value={s.value} label={s.label} />
-            ))}
-          </TabList>
+          <div style={{ overflowX: 'auto' }}>
+            <TabList value={section.value} onChange={setTab}>
+              {sections.map((s) => (
+                <Tab key={s.value} value={s.value} label={s.label} />
+              ))}
+            </TabList>
+          </div>
         </div>
       </div>
 

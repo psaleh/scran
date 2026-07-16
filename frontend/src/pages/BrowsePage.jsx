@@ -161,15 +161,16 @@ export default function BrowsePage() {
         </div>
 
         {allTags.length > 0 && (
-          <div style={{ display: 'flex', gap: 'var(--spacing-2)', flexWrap: 'wrap' }}>
-            {allTags.slice(0, 8).map((tag) => (
-              <ToggleButton
-                key={tag}
-                label={tag}
-                size="sm"
-                isPressed={activeTag === tag}
-                onPressedChange={(pressed) => setActiveTag(pressed ? tag : '')}
-              />
+          <div style={{ display: 'flex', gap: 'var(--spacing-2)', flexWrap: 'nowrap', overflowX: 'auto', paddingBottom: 'var(--spacing-1)' }}>
+            {allTags.map((tag) => (
+              <div key={tag} style={{ flexShrink: 0 }}>
+                <ToggleButton
+                  label={tag}
+                  size="sm"
+                  isPressed={activeTag === tag}
+                  onPressedChange={(pressed) => setActiveTag(pressed ? tag : '')}
+                />
+              </div>
             ))}
           </div>
         )}
@@ -204,7 +205,7 @@ export default function BrowsePage() {
             <EmptyState title="No recipes found" description="Try a different search or clear the tag filter." />
           )}
           {!error && recipes !== null && recipes.length > 0 && (
-            <div style={{ display: 'grid', gridTemplateColumns: isDesktop ? 'repeat(4, 1fr)' : '1fr', gap: 'var(--spacing-3)' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: isDesktop ? 'repeat(auto-fill, minmax(240px, 1fr))' : '1fr', gap: 'var(--spacing-3)' }}>
               {recipes.map((r) => (
                 <RecipeCard key={r.id} recipe={r} onOpen={(id) => navigate(`/recipes/${id}`)} />
               ))}

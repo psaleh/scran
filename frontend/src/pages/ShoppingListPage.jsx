@@ -316,7 +316,7 @@ export default function ShoppingListPage() {
               <TextInput label="Unit" isLabelHidden value={draftUnit} onChange={setDraftUnit} placeholder="unit" />
             </div>
             <div
-              style={{ flex: 1, position: 'relative' }}
+              style={{ flex: 1, minWidth: 0, position: 'relative' }}
               onFocus={() => { clearTimeout(blurTimer.current); setSuggestOpen(true) }}
               onBlur={() => { blurTimer.current = setTimeout(() => setSuggestOpen(false), 150) }}
               onKeyDown={(e) => { if (e.key === 'Enter') addItem() }}

@@ -12,7 +12,7 @@ import { api } from '../api.js'
 // Adapted from the Astryx "login" page template (npx astryx template login).
 // Standalone auth page paints its own body background (no host shell).
 const pageStyle = {
-  minHeight: '100vh',
+  minHeight: '100dvh',
   backgroundColor: 'var(--color-background-body)',
   padding: 'var(--spacing-6)',
 }
