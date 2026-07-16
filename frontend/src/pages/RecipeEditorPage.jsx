@@ -21,6 +21,7 @@ import { sectionLabelStyle, stepNumberStyle } from '../styles.js'
 import { useIsDesktop } from '../useIsDesktop.js'
 import ConfirmDialog from '../components/ConfirmDialog.jsx'
 import { useToast } from '../components/Toaster.jsx'
+import { SuggestionDropdown, useSuggestionKeyboard } from '../components/SuggestionDropdown.jsx'
 
 let nextRowId = 1
 const newIngredient = () => ({ rowId: nextRowId++, amount: '', unit: '', name: '', note: '', category_id: null, scalable: true, section: '' })
@@ -167,6 +168,13 @@ function IngredientRow({ ing, categories, sectionOptions, onChange, onRemove, dr
     setOpen(false)
   }
 
+  const nameKeys = useSuggestionKeyboard({
+    suggestions,
+    isOpen: open,
+    onPick: pick,
+    onClose: () => setOpen(false),
+  })
+
   // The displayed value includes the suggested tail (so it's the input's
   // real controlled value, not a manual DOM override that a re-render would
   // just clobber); ing.section — what actually gets saved — stays just the
@@ -238,28 +246,24 @@ function IngredientRow({ ing, categories, sectionOptions, onChange, onRemove, dr
           style={{ flex: 1, minWidth: 0, position: 'relative' }}
           onFocus={() => { clearTimeout(blurTimer.current); setOpen(true) }}
           onBlur={() => { blurTimer.current = setTimeout(() => setOpen(false), 150) }}
+          onKeyDown={nameKeys.onKeyDown}
         >
           <TextInput
             label="Ingredient name"
             isLabelHidden
             value={ing.name}
-            onChange={(v) => { onChange({ ...ing, name: v, category_id: null }); setOpen(true) }}
+            onChange={(v) => { onChange({ ...ing, name: v, category_id: null }); setOpen(true); nameKeys.reset() }}
             placeholder="Ingredient name"
           />
           {open && suggestions.length > 0 && (
-            <Card style={{ position: 'absolute', left: 0, right: 0, top: '100%', marginTop: 4, padding: 4, zIndex: 10, boxShadow: 'var(--shadow-high)' }}>
-              {suggestions.map((s) => (
-                <div
-                  key={s.name}
-                  onMouseDown={(e) => { e.preventDefault(); pick(s) }}
-                  style={{ padding: 'var(--spacing-2) var(--spacing-3)', borderRadius: 'var(--radius-inner)', fontSize: 'var(--text-body-size)', color: 'var(--color-text-primary)', cursor: 'pointer' }}
-                  onMouseEnter={(e) => { e.currentTarget.style.backgroundImage = 'linear-gradient(var(--color-overlay-hover), var(--color-overlay-hover))' }}
-                  onMouseLeave={(e) => { e.currentTarget.style.backgroundImage = 'none' }}
-                >
-                  {s.name}
-                </div>
-              ))}
-            </Card>
+            <SuggestionDropdown
+              items={suggestions}
+              getKey={(s) => s.name}
+              getLabel={(s) => s.name}
+              highlight={nameKeys.highlight}
+              onHighlight={nameKeys.setHighlight}
+              onPick={pick}
+            />
           )}
         </div>
         <IconButton label="Remove ingredient" icon={<span>×</span>} variant="ghost" onClick={onRemove} />
@@ -359,7 +363,6 @@ export default function RecipeEditorPage({ currentUser }) {
   // towards existing tags instead of near-duplicates ("Asian" vs "Asian Food").
   const [allTags, setAllTags] = useState([])
   const [tagSuggestOpen, setTagSuggestOpen] = useState(false)
-  const [tagHighlight, setTagHighlight] = useState(-1)
   const tagBlurTimer = useRef(null)
   const [sourceUrl, setSourceUrl] = useState(prefill?.source_url ?? null)
   const [status, setStatus] = useState('draft')
@@ -371,6 +374,8 @@ export default function RecipeEditorPage({ currentUser }) {
   const [steps, setSteps] = useState(prefill?.steps?.length ? prefill.steps : [''])
   const [photoFile, setPhotoFile] = useState(null)
   const [photoPreview, setPhotoPreview] = useState(null)
+  const photoPreviewRef = useRef(null)
+  photoPreviewRef.current = photoPreview
   const [existingPhoto, setExistingPhoto] = useState(null)
   // Photos found on the source page (spec issue #2) — the user picks one to
   // keep; the rest are simply never downloaded. A local upload always wins
@@ -412,6 +417,10 @@ export default function RecipeEditorPage({ currentUser }) {
     api('/api/recipes/tags').then(setAllTags).catch(() => {})
   }, [])
 
+  // Revoke the photo preview URL if the editor unmounts (e.g. Back/Cancel)
+  // while one is still outstanding.
+  useEffect(() => () => { if (photoPreviewRef.current) URL.revokeObjectURL(photoPreviewRef.current) }, [])
+
   useEffect(() => {
     if (id === undefined) return
     api(`/api/recipes/${id}`)
@@ -450,14 +459,12 @@ export default function RecipeEditorPage({ currentUser }) {
     if (t && !tags.includes(t)) setTags([...tags, t])
     setTagDraft('')
     setTagSuggestOpen(false)
-    setTagHighlight(-1)
   }
 
   const pickTag = (t) => {
     if (!tags.includes(t)) setTags([...tags, t])
     setTagDraft('')
     setTagSuggestOpen(false)
-    setTagHighlight(-1)
   }
 
   const tagSuggestions = tagDraft.trim()
@@ -466,27 +473,19 @@ export default function RecipeEditorPage({ currentUser }) {
         .slice(0, 8)
     : []
 
-  // Enter picks the highlighted suggestion when the dropdown is open (falls
-  // through to adding tagDraft verbatim otherwise); arrows move the
-  // highlight; Escape closes without picking.
+  const tagKeys = useSuggestionKeyboard({
+    suggestions: tagSuggestions,
+    isOpen: tagSuggestOpen,
+    onPick: pickTag,
+    onClose: () => setTagSuggestOpen(false),
+  })
+
+  // Enter picks the highlighted suggestion when the dropdown is open (via
+  // tagKeys.onKeyDown, below); falls through to adding tagDraft verbatim
+  // otherwise.
   const onTagKeyDown = (e) => {
-    if (e.key === 'ArrowDown' && tagSuggestOpen && tagSuggestions.length > 0) {
-      e.preventDefault()
-      setTagHighlight((i) => (i + 1) % tagSuggestions.length)
-    } else if (e.key === 'ArrowUp' && tagSuggestOpen && tagSuggestions.length > 0) {
-      e.preventDefault()
-      setTagHighlight((i) => (i <= 0 ? tagSuggestions.length - 1 : i - 1))
-    } else if (e.key === 'Enter') {
-      e.preventDefault()
-      if (tagSuggestOpen && tagHighlight >= 0 && tagHighlight < tagSuggestions.length) {
-        pickTag(tagSuggestions[tagHighlight])
-      } else {
-        addTag()
-      }
-    } else if (e.key === 'Escape' && tagSuggestOpen) {
-      setTagSuggestOpen(false)
-      setTagHighlight(-1)
-    }
+    tagKeys.onKeyDown(e)
+    if (e.key === 'Enter' && !e.defaultPrevented) addTag()
   }
 
   const choosePhoto = (e) => {
@@ -494,12 +493,20 @@ export default function RecipeEditorPage({ currentUser }) {
     if (!file) return
     setChosenImageUrl(null) // a local upload replaces any picked candidate
     setPhotoFile(file)
-    setPhotoPreview(URL.createObjectURL(file))
+    // Revoke the previous preview URL (if any) — otherwise picking a
+    // different photo, or several in a row, leaks one object URL each time.
+    setPhotoPreview((prev) => {
+      if (prev) URL.revokeObjectURL(prev)
+      return URL.createObjectURL(file)
+    })
   }
 
   const pickImageChoice = (url) => {
     setPhotoFile(null)
-    setPhotoPreview(null)
+    setPhotoPreview((prev) => {
+      if (prev) URL.revokeObjectURL(prev)
+      return null
+    })
     setChosenImageUrl((current) => (current === url ? null : url))
   }
 
@@ -909,7 +916,13 @@ export default function RecipeEditorPage({ currentUser }) {
                       label={
                         <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
                           {t}
-                          <span onClick={() => setTags(tags.filter((x) => x !== t))} style={{ cursor: 'pointer' }}>×</span>
+                          <IconButton
+                            label={`Remove tag ${t}`}
+                            icon={<span>×</span>}
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setTags(tags.filter((x) => x !== t))}
+                          />
                         </span>
                       }
                     />
@@ -925,7 +938,7 @@ export default function RecipeEditorPage({ currentUser }) {
                 <TextInput
                   label="Tags"
                   value={tagDraft}
-                  onChange={(v) => { setTagDraft(v); setTagSuggestOpen(true); setTagHighlight(-1) }}
+                  onChange={(v) => { setTagDraft(v); setTagSuggestOpen(true); tagKeys.reset() }}
                   placeholder="Add a tag, press Enter"
                   isOptional
                 />
@@ -933,27 +946,14 @@ export default function RecipeEditorPage({ currentUser }) {
                     manual tag reuses "Asian" instead of adding "Asian Food".
                     Arrow keys move the highlight; Enter picks it. */}
                 {tagSuggestOpen && tagSuggestions.length > 0 && (
-                  <Card style={{ position: 'absolute', left: 0, right: 0, top: '100%', marginTop: 4, padding: 4, zIndex: 10, boxShadow: 'var(--shadow-high)' }}>
-                    {tagSuggestions.map((t, i) => (
-                      <div
-                        key={t}
-                        onMouseDown={(e) => { e.preventDefault(); pickTag(t) }}
-                        onMouseEnter={() => setTagHighlight(i)}
-                        style={{
-                          padding: 'var(--spacing-2) var(--spacing-3)',
-                          borderRadius: 'var(--radius-inner)',
-                          fontSize: 'var(--text-body-size)',
-                          color: 'var(--color-text-primary)',
-                          cursor: 'pointer',
-                          backgroundImage: i === tagHighlight
-                            ? 'linear-gradient(var(--color-overlay-hover), var(--color-overlay-hover))'
-                            : 'none',
-                        }}
-                      >
-                        {t}
-                      </div>
-                    ))}
-                  </Card>
+                  <SuggestionDropdown
+                    items={tagSuggestions}
+                    getKey={(t) => t}
+                    getLabel={(t) => t}
+                    highlight={tagKeys.highlight}
+                    onHighlight={tagKeys.setHighlight}
+                    onPick={pickTag}
+                  />
                 )}
               </div>
             </div>

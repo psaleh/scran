@@ -15,6 +15,7 @@ import { api } from '../api.js'
 import TagBadge from '../components/TagBadge.jsx'
 import ConfirmDialog from '../components/ConfirmDialog.jsx'
 import { useToast } from '../components/Toaster.jsx'
+import { SuggestionDropdown, useSuggestionKeyboard } from '../components/SuggestionDropdown.jsx'
 import { sectionLabelStyle } from '../styles.js'
 
 const SWIPE_THRESHOLD = 140
@@ -124,15 +125,16 @@ function ItemRow({ item, onToggle, onRemove, onRecategorise }) {
             </div>
           )}
         </div>
-        {/* Recategorise (spec §3.6.4). Stop pointer events so the tap doesn't
-            also toggle the item or start a swipe. */}
+        {/* Item actions (recategorise, spec §3.6.4, plus mark done/remove —
+            the only non-swipe path for those). Stop pointer events so the
+            tap doesn't also toggle the item or start a swipe. */}
         <div
           onPointerDown={(e) => e.stopPropagation()}
           onPointerUp={(e) => e.stopPropagation()}
           style={{ flexShrink: 0 }}
         >
           <IconButton
-            label="Change category"
+            label={`${item.name} actions`}
             icon={<span>⊞</span>}
             variant="ghost"
             size="sm"
@@ -242,6 +244,19 @@ export default function ShoppingListPage() {
       toast.error(err.message)
     }
   }
+
+  const pickSuggestion = (s) => {
+    setDraft(s.name)
+    setDraftCategory(s.category_id)
+    setSuggestOpen(false)
+  }
+
+  const suggestKeys = useSuggestionKeyboard({
+    suggestions,
+    isOpen: suggestOpen,
+    onPick: pickSuggestion,
+    onClose: () => setSuggestOpen(false),
+  })
 
   const toggleItem = async (item) => {
     // Optimistic: flip locally, then persist; roll back on failure.
@@ -363,34 +378,27 @@ export default function ShoppingListPage() {
               style={{ flex: 1, minWidth: 0, position: 'relative' }}
               onFocus={() => { clearTimeout(blurTimer.current); setSuggestOpen(true) }}
               onBlur={() => { blurTimer.current = setTimeout(() => setSuggestOpen(false), 150) }}
-              onKeyDown={(e) => { if (e.key === 'Enter') addItem() }}
+              onKeyDown={(e) => {
+                suggestKeys.onKeyDown(e)
+                if (e.key === 'Enter' && !e.defaultPrevented) addItem()
+              }}
             >
               <TextInput
                 label="Add item"
                 isLabelHidden
                 value={draft}
-                onChange={(v) => { setDraft(v); setDraftCategory(null); setSuggestOpen(true) }}
+                onChange={(v) => { setDraft(v); setDraftCategory(null); setSuggestOpen(true); suggestKeys.reset() }}
                 placeholder="Add item…"
               />
               {suggestOpen && suggestions.length > 0 && (
-                <Card style={{ position: 'absolute', left: 0, right: 0, top: '100%', marginTop: 4, padding: 4, zIndex: 10, boxShadow: 'var(--shadow-high)' }}>
-                  {suggestions.map((s) => (
-                    <div
-                      key={s.name}
-                      onMouseDown={(e) => {
-                        e.preventDefault()
-                        setDraft(s.name)
-                        setDraftCategory(s.category_id)
-                        setSuggestOpen(false)
-                      }}
-                      style={{ padding: 'var(--spacing-2) var(--spacing-3)', borderRadius: 'var(--radius-inner)', fontSize: 'var(--text-body-size)', color: 'var(--color-text-primary)', cursor: 'pointer' }}
-                      onMouseEnter={(e) => { e.currentTarget.style.backgroundImage = 'linear-gradient(var(--color-overlay-hover), var(--color-overlay-hover))' }}
-                      onMouseLeave={(e) => { e.currentTarget.style.backgroundImage = 'none' }}
-                    >
-                      {s.name}
-                    </div>
-                  ))}
-                </Card>
+                <SuggestionDropdown
+                  items={suggestions}
+                  getKey={(s) => s.name}
+                  getLabel={(s) => s.name}
+                  highlight={suggestKeys.highlight}
+                  onHighlight={suggestKeys.setHighlight}
+                  onPick={pickSuggestion}
+                />
               )}
             </div>
             <IconButton label="Add item" icon={<span>+</span>} variant="primary" clickAction={addItem} isDisabled={!draft.trim()} />
@@ -425,14 +433,33 @@ export default function ShoppingListPage() {
           )}
         </div>
 
-        {/* Recategorise dialog: one tap moves the item and teaches the
-            lookup table, so the AI/autocomplete gets it right next time. */}
+        {/* Per-row actions dialog: the same "change category" tap target also
+            gives Mark done/Remove a keyboard/assistive path, since the list
+            row itself is swipe-only (spec: plain tap does nothing there). */}
         <Dialog isOpen={recatItem !== null} onOpenChange={(open) => { if (!open) setRecatItem(null) }} purpose="form">
           {recatItem && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-3)', padding: 'var(--spacing-2)' }}>
               <h2 style={{ margin: 0, fontSize: 'var(--text-heading-2-size)', fontWeight: 'var(--text-heading-2-weight)', color: 'var(--color-text-primary)' }}>
-                Category for “{recatItem.name}”
+                “{recatItem.name}”
               </h2>
+              <div style={{ display: 'flex', gap: 'var(--spacing-2)' }}>
+                <div style={{ flex: 1 }}>
+                  <Button
+                    label={recatItem.checked ? 'Mark not done' : 'Mark done'}
+                    variant="secondary"
+                    clickAction={() => { toggleItem(recatItem); setRecatItem(null) }}
+                  />
+                </div>
+                <div style={{ flex: 1 }}>
+                  <Button
+                    label="Remove"
+                    variant="destructive"
+                    clickAction={() => { removeItem(recatItem); setRecatItem(null) }}
+                  />
+                </div>
+              </div>
+              <Divider />
+              <span style={{ fontSize: 'var(--text-supporting-size)', color: 'var(--color-text-secondary)' }}>Category</span>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-1)', maxHeight: '50vh', overflowY: 'auto' }}>
                 {categories.map((c) => (
                   <Button

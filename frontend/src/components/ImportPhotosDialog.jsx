@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Banner } from '@astryxdesign/core/Banner'
 import { Button } from '@astryxdesign/core/Button'
@@ -17,25 +17,44 @@ const MAX_PHOTOS = 8 // matches MAX_IMPORT_PHOTOS on the server
  * without a human looking at it first.
  */
 export default function ImportPhotosDialog({ isOpen, onOpenChange }) {
+  // {file, url}[] — the object URL is created once per file (not on every
+  // render, which leaked one URL per render per photo) and revoked whenever
+  // that entry leaves the list.
   const [files, setFiles] = useState([])
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const fileInput = useRef(null)
   const navigate = useNavigate()
+  const filesRef = useRef(files)
+  filesRef.current = files
+
+  // Revoke any still-outstanding URLs if the dialog unmounts without going
+  // through close() (e.g. navigating away mid-pick).
+  useEffect(() => () => { filesRef.current.forEach((f) => URL.revokeObjectURL(f.url)) }, [])
 
   const addFiles = (e) => {
     const picked = Array.from(e.target.files ?? [])
-    setFiles((current) => [...current, ...picked].slice(0, MAX_PHOTOS))
+    setFiles((current) => {
+      const combined = [...current, ...picked.map((file) => ({ file, url: URL.createObjectURL(file) }))]
+      const kept = combined.slice(0, MAX_PHOTOS)
+      // Revoke URLs for anything bumped off the end by the MAX_PHOTOS cap.
+      combined.slice(MAX_PHOTOS).forEach((f) => URL.revokeObjectURL(f.url))
+      return kept
+    })
     setError('')
     // Reset so picking the same file again after removing it still fires.
     e.target.value = ''
   }
 
-  const removeFile = (index) => setFiles((current) => current.filter((_, i) => i !== index))
+  const removeFile = (index) => setFiles((current) => {
+    URL.revokeObjectURL(current[index].url)
+    return current.filter((_, i) => i !== index)
+  })
 
   const close = (open) => {
     if (busy) return
     if (!open) {
+      files.forEach((f) => URL.revokeObjectURL(f.url))
       setFiles([])
       setError('')
     }
@@ -50,7 +69,8 @@ export default function ImportPhotosDialog({ isOpen, onOpenChange }) {
       // Photos upload at original resolution on purpose: downscaling (tried
       // at 1600px) made small-print ingredient columns illegible to the
       // vision model, which then silently dropped them from the recipe.
-      await uploadMany('/api/import/photos', 'photos', files)
+      await uploadMany('/api/import/photos', 'photos', files.map((f) => f.file))
+      files.forEach((f) => URL.revokeObjectURL(f.url))
       setFiles([])
       onOpenChange(false)
       navigate('/inbox')
@@ -87,10 +107,10 @@ export default function ImportPhotosDialog({ isOpen, onOpenChange }) {
 
         {files.length > 0 && (
           <div style={{ display: 'flex', gap: 'var(--spacing-2)', flexWrap: 'wrap' }}>
-            {files.map((file, i) => (
+            {files.map(({ file, url }, i) => (
               <div key={`${file.name}-${i}`} style={{ position: 'relative' }}>
                 <img
-                  src={URL.createObjectURL(file)}
+                  src={url}
                   alt={`Page ${i + 1}`}
                   style={{
                     width: 88,

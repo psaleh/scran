@@ -20,6 +20,15 @@ export default function ImportVideoDialog({ isOpen, onOpenChange }) {
   const [error, setError] = useState('')
   const navigate = useNavigate()
 
+  const close = (open) => {
+    if (busy) return
+    if (!open) {
+      setUrl('')
+      setError('')
+    }
+    onOpenChange(open)
+  }
+
   const doImport = async () => {
     if (!url.trim() || busy) return
     setBusy(true)
@@ -37,7 +46,7 @@ export default function ImportVideoDialog({ isOpen, onOpenChange }) {
   }
 
   return (
-    <Dialog isOpen={isOpen} onOpenChange={onOpenChange} purpose="form">
+    <Dialog isOpen={isOpen} onOpenChange={close} purpose="form">
       <div
         style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-4)', padding: 'var(--spacing-2)' }}
         onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); doImport() } }}
@@ -60,7 +69,7 @@ export default function ImportVideoDialog({ isOpen, onOpenChange }) {
           type="url"
         />
         <div style={{ display: 'flex', gap: 'var(--spacing-2)', justifyContent: 'flex-end' }}>
-          <Button label="Cancel" variant="ghost" onClick={() => onOpenChange(false)} isDisabled={busy} />
+          <Button label="Cancel" variant="ghost" onClick={() => close(false)} isDisabled={busy} />
           <Button label={busy ? 'Queueing…' : 'Import'} variant="primary" clickAction={doImport} isDisabled={busy || !url.trim()} />
         </div>
       </div>

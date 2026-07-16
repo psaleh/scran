@@ -21,6 +21,16 @@ export default function ImportUrlDialog({ isOpen, onOpenChange }) {
   const [offerAi, setOfferAi] = useState(false)
   const navigate = useNavigate()
 
+  const close = (open) => {
+    if (busy) return
+    if (!open) {
+      setUrl('')
+      setError('')
+      setOfferAi(false)
+    }
+    onOpenChange(open)
+  }
+
   const doImport = async () => {
     if (!url.trim() || busy) return
     setBusy(true)
@@ -60,7 +70,7 @@ export default function ImportUrlDialog({ isOpen, onOpenChange }) {
   }
 
   return (
-    <Dialog isOpen={isOpen} onOpenChange={onOpenChange} purpose="form">
+    <Dialog isOpen={isOpen} onOpenChange={close} purpose="form">
       <div
         style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-4)', padding: 'var(--spacing-2)' }}
         onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); doImport() } }}
@@ -90,7 +100,7 @@ export default function ImportUrlDialog({ isOpen, onOpenChange }) {
           type="url"
         />
         <div style={{ display: 'flex', gap: 'var(--spacing-2)', justifyContent: 'flex-end' }}>
-          <Button label="Cancel" variant="ghost" onClick={() => onOpenChange(false)} isDisabled={busy} />
+          <Button label="Cancel" variant="ghost" onClick={() => close(false)} isDisabled={busy} />
           {offerAi && (
             <Button label={busy ? 'Queueing…' : 'Try AI extraction'} variant="secondary" clickAction={doAiImport} isDisabled={busy} />
           )}

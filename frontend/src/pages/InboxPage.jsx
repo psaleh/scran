@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Badge } from '@astryxdesign/core/Badge'
+import { Banner } from '@astryxdesign/core/Banner'
 import { Button } from '@astryxdesign/core/Button'
 import { Card } from '@astryxdesign/core/Card'
 import { EmptyState } from '@astryxdesign/core/EmptyState'
@@ -123,11 +124,31 @@ export default function InboxPage() {
     }
   }
 
-  // Poll while the screen is open so statuses move on their own.
+  // Poll while the screen is open so statuses move on their own — but not
+  // while the tab is hidden (a backgrounded tab has no reason to keep
+  // hitting the API every 5s); refresh immediately when it becomes visible
+  // again so the view isn't stale on return.
   useEffect(() => {
+    const startPolling = () => {
+      clearInterval(timerRef.current)
+      timerRef.current = setInterval(load, POLL_MS)
+    }
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        load()
+        startPolling()
+      } else {
+        clearInterval(timerRef.current)
+      }
+    }
+
     load()
-    timerRef.current = setInterval(load, POLL_MS)
-    return () => clearInterval(timerRef.current)
+    startPolling()
+    document.addEventListener('visibilitychange', onVisibilityChange)
+    return () => {
+      clearInterval(timerRef.current)
+      document.removeEventListener('visibilitychange', onVisibilityChange)
+    }
   }, [])
 
   const retry = async (id) => {
@@ -233,9 +254,7 @@ export default function InboxPage() {
       {/* Job list */}
       <div style={{ flex: 1, overflowY: 'auto', padding: isDesktop ? 'var(--spacing-6)' : 'var(--spacing-4)' }}>
         <div style={{ maxWidth: isDesktop ? 720 : 'none', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 'var(--spacing-3)' }}>
-          {error && (
-            <span style={{ fontSize: 'var(--text-supporting-size)', color: 'var(--color-text-error)' }}>{error}</span>
-          )}
+          {error && <Banner status="error" title={error} />}
           {jobs === null ? (
             <Spinner size="lg" label="Loading" />
           ) : jobs.length === 0 ? (

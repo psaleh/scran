@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Banner } from '@astryxdesign/core/Banner'
 import { Button } from '@astryxdesign/core/Button'
 import { Dialog } from '@astryxdesign/core/Dialog'
+import { Spinner } from '@astryxdesign/core/Spinner'
 import { TextArea } from '@astryxdesign/core/TextArea'
 
 import { api } from '../api.js'
@@ -14,22 +15,47 @@ import { api } from '../api.js'
  */
 export default function ExportRecipeDialog({ recipeId, title, isOpen, onOpenChange }) {
   const [json, setJson] = useState('')
+  const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [copied, setCopied] = useState(false)
+  const textAreaRef = useRef(null) // forwarded straight to the <textarea>
 
   useEffect(() => {
     if (!isOpen) return
     setError('')
     setJson('')
+    setCopied(false)
+    setLoading(true)
     api(`/api/recipes/${recipeId}/export`)
       .then((data) => setJson(JSON.stringify(data, null, 2)))
       .catch((err) => setError(err.message))
+      .finally(() => setLoading(false))
   }, [isOpen, recipeId])
 
   const copy = async () => {
-    await navigator.clipboard.writeText(json)
-    setCopied(true)
-    setTimeout(() => setCopied(false), 1400)
+    setError('')
+    try {
+      await navigator.clipboard.writeText(json)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1400)
+      return
+    } catch {
+      // navigator.clipboard throws on plain-HTTP LAN deployments (this app
+      // is self-hosted, often without TLS) — fall back to the older
+      // select-and-copy approach.
+    }
+    try {
+      const el = textAreaRef.current
+      if (!el) throw new Error('no textarea')
+      el.focus()
+      el.select()
+      const ok = document.execCommand('copy')
+      if (!ok) throw new Error('execCommand failed')
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1400)
+    } catch {
+      setError("Couldn't copy automatically — select the text above and copy it manually.")
+    }
   }
 
   const download = () => {
@@ -55,13 +81,20 @@ export default function ExportRecipeDialog({ recipeId, title, isOpen, onOpenChan
           </p>
         </div>
         {error && <Banner status="error" title={error} />}
-        <TextArea
-          label="Recipe data"
-          isLabelHidden
-          value={json}
-          onChange={setJson}
-          rows={12}
-        />
+        {loading ? (
+          <div style={{ display: 'flex', justifyContent: 'center', padding: 'var(--spacing-6)' }}>
+            <Spinner label="Preparing export" />
+          </div>
+        ) : (
+          <TextArea
+            ref={textAreaRef}
+            label="Recipe data"
+            isLabelHidden
+            value={json}
+            onChange={setJson}
+            rows={12}
+          />
+        )}
         <div style={{ display: 'flex', gap: 'var(--spacing-2)', justifyContent: 'flex-end' }}>
           <Button label="Close" variant="ghost" onClick={() => onOpenChange(false)} />
           <Button label="Download file" variant="secondary" onClick={download} isDisabled={!json} />

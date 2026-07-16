@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { Badge } from '@astryxdesign/core/Badge'
 import { Button } from '@astryxdesign/core/Button'
 import { Card } from '@astryxdesign/core/Card'
@@ -17,17 +17,17 @@ import ImportVideoDialog from '../components/ImportVideoDialog.jsx'
 import TagBadge from '../components/TagBadge.jsx'
 import { useIsDesktop } from '../useIsDesktop.js'
 
-function RecipeCard({ recipe, onOpen }) {
+function RecipeCard({ recipe }) {
   const [hover, setHover] = useState(false)
   return (
-    <div
+    <Link
+      to={`/recipes/${recipe.id}`}
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
-      onClick={() => onOpen(recipe.id)}
       // minWidth: 0 stops a long title's intrinsic width from stretching this
       // grid item past its column — without it, text-overflow: ellipsis on
       // the title below has no narrower box to actually clip against.
-      style={{ cursor: 'pointer', minWidth: 0 }}
+      style={{ display: 'block', minWidth: 0, color: 'inherit', textDecoration: 'none' }}
     >
       <Card padding={0} style={{ overflow: 'hidden', boxShadow: hover ? 'var(--shadow-med)' : undefined, transition: 'box-shadow 125ms cubic-bezier(0.24,1,0.4,1)' }}>
         <div
@@ -78,7 +78,7 @@ function RecipeCard({ recipe, onOpen }) {
           </div>
         </div>
       </Card>
-    </div>
+    </Link>
   )
 }
 
@@ -207,7 +207,7 @@ export default function BrowsePage() {
           {!error && recipes !== null && recipes.length > 0 && (
             <div style={{ display: 'grid', gridTemplateColumns: isDesktop ? 'repeat(auto-fill, minmax(240px, 1fr))' : '1fr', gap: 'var(--spacing-3)' }}>
               {recipes.map((r) => (
-                <RecipeCard key={r.id} recipe={r} onOpen={(id) => navigate(`/recipes/${id}`)} />
+                <RecipeCard key={r.id} recipe={r} />
               ))}
             </div>
           )}

@@ -8,6 +8,7 @@ import { CheckboxInput } from '@astryxdesign/core/CheckboxInput'
 import { Dialog } from '@astryxdesign/core/Dialog'
 import { Divider } from '@astryxdesign/core/Divider'
 import { IconButton } from '@astryxdesign/core/IconButton'
+import { Spinner } from '@astryxdesign/core/Spinner'
 import { TabList, Tab } from '@astryxdesign/core/TabList'
 import { TextInput } from '@astryxdesign/core/TextInput'
 
@@ -26,6 +27,7 @@ const rowStyle = {
 }
 const rowTextStyle = { flex: 1, fontSize: 'var(--font-size-lg)', color: 'var(--color-text-primary)' }
 const hintStyle = { fontSize: 'var(--font-size-sm)', color: 'var(--color-text-secondary)' }
+const sectionSpinnerStyle = { display: 'flex', justifyContent: 'center', padding: 'var(--spacing-6)' }
 
 function DialogFrame({ title, children }) {
   return (
@@ -41,7 +43,7 @@ function DialogFrame({ title, children }) {
 // --- AI profiles ------------------------------------------------------------
 
 function AiProfilesSection() {
-  const [profiles, setProfiles] = useState([])
+  const [profiles, setProfiles] = useState(null) // null = loading
   const [editing, setEditing] = useState(null) // null | {} (new) | profile
   const [error, setError] = useState('')
   const [testingId, setTestingId] = useState(null)
@@ -50,7 +52,7 @@ function AiProfilesSection() {
   const [deleteBusy, setDeleteBusy] = useState(false)
   const toast = useToast()
 
-  const load = () => api('/api/ai-profiles').then(setProfiles).catch((e) => setError(e.message))
+  const load = () => api('/api/ai-profiles').then(setProfiles).catch((e) => { setError(e.message); setProfiles([]) })
   useEffect(() => { load() }, [])
 
   const save = async () => {
@@ -106,6 +108,14 @@ function AiProfilesSection() {
     }
   }
 
+  if (profiles === null) {
+    return (
+      <div style={sectionSpinnerStyle}>
+        <Spinner label="Loading AI profiles" />
+      </div>
+    )
+  }
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-3)' }}>
       {error && <Banner status="error" title={error} />}
@@ -116,6 +126,7 @@ function AiProfilesSection() {
         from videos — it needs a video-capable hosted model (e.g.
         google/gemini-2.5-flash via OpenRouter).
       </span>
+      {profiles.length === 0 && <span style={hintStyle}>No profiles yet.</span>}
       {profiles.length > 0 && (
         <Card padding={0}>
           {profiles.map((p, i) => (
@@ -207,7 +218,7 @@ function AiProfilesSection() {
 // --- Stores & walking routes --------------------------------------------------
 
 function StoresSection() {
-  const [stores, setStores] = useState([])
+  const [stores, setStores] = useState(null) // null = loading
   const [categories, setCategories] = useState([])
   const [selectedId, setSelectedId] = useState(null)
   const [newStore, setNewStore] = useState('')
@@ -222,7 +233,17 @@ function StoresSection() {
     setCategories(c)
     setSelectedId((id) => id ?? s[0]?.id ?? null)
   }
-  useEffect(() => { load().catch((e) => setError(e.message)) }, [])
+  useEffect(() => {
+    load().catch((e) => { setError(e.message); setStores([]) })
+  }, [])
+
+  if (stores === null) {
+    return (
+      <div style={sectionSpinnerStyle}>
+        <Spinner label="Loading stores" />
+      </div>
+    )
+  }
 
   const categoryName = Object.fromEntries(categories.map((c) => [c.id, c.name]))
   const selected = stores.find((s) => s.id === selectedId)
@@ -333,14 +354,14 @@ function StoresSection() {
 // --- Categories -----------------------------------------------------------------
 
 function CategoriesSection() {
-  const [categories, setCategories] = useState([])
+  const [categories, setCategories] = useState(null) // null = loading
   const [newName, setNewName] = useState('')
   const [renamingId, setRenamingId] = useState(null)
   const [renameText, setRenameText] = useState('')
   const [error, setError] = useState('')
   const [deleteTarget, setDeleteTarget] = useState(null) // category being deleted
 
-  const load = () => api('/api/categories').then(setCategories).catch((e) => setError(e.message))
+  const load = () => api('/api/categories').then(setCategories).catch((e) => { setError(e.message); setCategories([]) })
   useEffect(() => { load() }, [])
 
   const run = async (fn) => {
@@ -367,6 +388,14 @@ function CategoriesSection() {
     setDeleteTarget(null)
   })
 
+  if (categories === null) {
+    return (
+      <div style={sectionSpinnerStyle}>
+        <Spinner label="Loading categories" />
+      </div>
+    )
+  }
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-3)' }}>
       {error && <Banner status="error" title={error} />}
@@ -374,6 +403,7 @@ function CategoriesSection() {
         Grocery categories used to sort the shopping list. Deleting one moves
         its items to "Uncategorised"; new ones join the end of every store route.
       </span>
+      {categories.length === 0 && <span style={hintStyle}>No categories yet.</span>}
       <Card padding={0}>
         {categories.map((c, i) => (
           <div key={c.id}>
@@ -420,7 +450,7 @@ function CategoriesSection() {
 // --- Users (admin only) ------------------------------------------------------------
 
 function UsersSection({ currentUser }) {
-  const [users, setUsers] = useState([])
+  const [users, setUsers] = useState(null) // null = loading
   const [adding, setAdding] = useState(false)
   const [form, setForm] = useState({ username: '', password: '', is_admin: false })
   const [resetting, setResetting] = useState(null) // user being password-reset
@@ -429,7 +459,7 @@ function UsersSection({ currentUser }) {
   const [deleteTarget, setDeleteTarget] = useState(null) // user being deleted
   const [adminToggleTarget, setAdminToggleTarget] = useState(null) // user whose admin role is changing
 
-  const load = () => api('/api/users').then(setUsers).catch((e) => setError(e.message))
+  const load = () => api('/api/users').then(setUsers).catch((e) => { setError(e.message); setUsers([]) })
   useEffect(() => { load() }, [])
 
   const run = async (fn) => {
@@ -461,9 +491,18 @@ function UsersSection({ currentUser }) {
     setDeleteTarget(null)
   })
 
+  if (users === null) {
+    return (
+      <div style={sectionSpinnerStyle}>
+        <Spinner label="Loading users" />
+      </div>
+    )
+  }
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-3)' }}>
       {error && <Banner status="error" title={error} />}
+      {users.length === 0 && <span style={hintStyle}>No users yet.</span>}
       <Card padding={0}>
         {users.map((u, i) => (
           <div key={u.id}>
@@ -543,7 +582,13 @@ function UsersSection({ currentUser }) {
 function AuthSection() {
   const [info, setInfo] = useState(null)
   useEffect(() => { api('/api/settings/auth').then(setInfo).catch(() => {}) }, [])
-  if (!info) return null
+  if (!info) {
+    return (
+      <div style={sectionSpinnerStyle}>
+        <Spinner label="Loading auth settings" />
+      </div>
+    )
+  }
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-3)' }}>
       <Banner
