@@ -343,6 +343,9 @@ users (admin-only), auth options).
 - Frontend is a React SPA built on the Astryx design system (pre-built
   stylesheet path), chosen deliberately as a React learning project — do
   not swap it for server-rendered templates or another component library.
+- Theme is strictly **matcha** (`@astryxdesign/theme-matcha`, wired in
+  `frontend/src/main.jsx`: `theme.css` import + `matchaTheme` on the
+  `Theme` provider). Do not switch themes or override theme tokens.
 
 ## Owner context
 
