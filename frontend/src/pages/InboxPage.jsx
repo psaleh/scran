@@ -49,7 +49,7 @@ function JobCard({ job, onRetry, onReview }) {
   return (
     <Card elevation="low" style={{ display: 'flex', gap: 'var(--spacing-3)' }}>
       <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 'var(--spacing-1)' }}>
-        <div style={{ fontSize: 'var(--font-size-lg)', fontWeight: 'var(--font-weight-medium)', color: 'var(--color-text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        <div style={{ fontSize: 'var(--text-large-size)', fontWeight: 'var(--font-weight-medium)', color: 'var(--color-text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {TYPE_LABELS[job.type] || job.type}
         </div>
         {job.summary && (

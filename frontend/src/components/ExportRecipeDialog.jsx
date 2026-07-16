@@ -6,6 +6,7 @@ import { Spinner } from '@astryxdesign/core/Spinner'
 import { TextArea } from '@astryxdesign/core/TextArea'
 
 import { api } from '../api.js'
+import DialogFrame from './DialogFrame.jsx'
 
 /**
  * "Export recipe" dialog: fetches the portable JSON shape for this recipe
@@ -70,16 +71,10 @@ export default function ExportRecipeDialog({ recipeId, title, isOpen, onOpenChan
 
   return (
     <Dialog isOpen={isOpen} onOpenChange={onOpenChange} purpose="form">
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-4)', padding: 'var(--spacing-2)' }}>
-        <div>
-          <h2 style={{ margin: 0, fontSize: 'var(--text-heading-2-size)', fontWeight: 'var(--text-heading-2-weight)', color: 'var(--color-text-primary)' }}>
-            Export recipe
-          </h2>
-          <p style={{ margin: 'var(--spacing-1) 0 0', fontSize: 'var(--font-size-base)', color: 'var(--color-text-secondary)' }}>
-            Copy this and paste it into "Import recipe data" on another Scran
-            instance, or download it as a file.
-          </p>
-        </div>
+      <DialogFrame
+        title="Export recipe"
+        description='Copy this and paste it into "Import recipe data" on another Scran instance, or download it as a file.'
+      >
         {error && <Banner status="error" title={error} />}
         {loading ? (
           <div style={{ display: 'flex', justifyContent: 'center', padding: 'var(--spacing-6)' }}>
@@ -100,7 +95,7 @@ export default function ExportRecipeDialog({ recipeId, title, isOpen, onOpenChan
           <Button label="Download file" variant="secondary" onClick={download} isDisabled={!json} />
           <Button label={copied ? 'Copied!' : 'Copy to clipboard'} variant="primary" clickAction={copy} isDisabled={!json} />
         </div>
-      </div>
+      </DialogFrame>
     </Dialog>
   )
 }

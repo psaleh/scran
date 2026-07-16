@@ -16,7 +16,7 @@ import TagBadge from '../components/TagBadge.jsx'
 import ConfirmDialog from '../components/ConfirmDialog.jsx'
 import { useToast } from '../components/Toaster.jsx'
 import { SuggestionDropdown, useSuggestionKeyboard } from '../components/SuggestionDropdown.jsx'
-import { sectionLabelStyle } from '../styles.js'
+import { formatAmount, sectionLabelStyle } from '../styles.js'
 
 const SWIPE_THRESHOLD = 140
 
@@ -55,9 +55,7 @@ function ItemRow({ item, onToggle, onRemove, onRecategorise }) {
     setDx(0)
   }
 
-  const meta = [item.amount != null ? String(Math.round(item.amount * 100) / 100) : null, item.unit]
-    .filter(Boolean)
-    .join(' ')
+  const meta = [formatAmount(item.amount), item.unit].filter(Boolean).join(' ')
   const revealRight = dx > 0
   const revealAmount = Math.min(Math.abs(dx), SWIPE_THRESHOLD)
 

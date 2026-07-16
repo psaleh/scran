@@ -55,9 +55,9 @@ export default function LoginPage({ onLogin }) {
   return (
     <Center axis="both" style={pageStyle}>
       <VStack gap={4} hAlign="center" style={contentStyle}>
-        <Text type="body" weight="bold" size="lg">
-          Scran
-        </Text>
+        <Heading level={1}>
+          scran<span style={{ color: 'var(--color-text-orange)' }}>.</span>
+        </Heading>
 
         <Card padding={8} width="100%">
           {/* Wrapping in a real <form> makes Enter submit and lets password

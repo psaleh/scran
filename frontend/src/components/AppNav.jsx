@@ -3,11 +3,10 @@ import { IconButton } from '@astryxdesign/core/IconButton'
 import { useIsDesktop } from '../useIsDesktop.js'
 
 // Navigation shell from the design project's shared.jsx: a top bar on
-// desktop, a bottom tab bar on mobile. Sections that aren't built yet are
-// listed but disabled so the layout matches the final app.
+// desktop, a bottom tab bar on mobile.
 const NAV_ITEMS = [
   { key: 'recipes', label: 'Recipes', to: '/' },
-  { key: 'shopping', label: 'Shopping list', to: '/shopping' },
+  { key: 'shopping', label: 'Shopping list', mobileLabel: 'Shopping', to: '/shopping' },
   { key: 'inbox', label: 'Import inbox', to: '/inbox' },
   { key: 'settings', label: 'Settings', to: '/settings' },
 ]
@@ -16,7 +15,7 @@ function Wordmark() {
   return (
     <span
       style={{
-        fontSize: 'var(--font-size-lg)',
+        fontSize: 'var(--text-large-size)',
         fontWeight: 'var(--font-weight-bold)',
         color: 'var(--color-text-primary)',
         letterSpacing: '-0.02em',
@@ -28,20 +27,24 @@ function Wordmark() {
   )
 }
 
-function itemStyle({ active, disabled }) {
+function itemStyle({ active }) {
   return {
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
     textDecoration: 'none',
-    color: disabled
-      ? 'var(--color-text-disabled)'
-      : active
-        ? 'var(--color-accent)'
-        : 'var(--color-text-secondary)',
+    color: active ? 'var(--color-accent)' : 'var(--color-text-secondary)',
     fontWeight: active ? 'var(--font-weight-semibold)' : 'var(--font-weight-medium)',
-    pointerEvents: disabled ? 'none' : 'auto',
   }
+}
+
+// Shared shape for the mobile bottom-nav items and the logout button beside them.
+const mobileItemStyle = {
+  flex: 1,
+  flexDirection: 'column',
+  gap: 'var(--spacing-0-5)',
+  padding: 'var(--spacing-2) 0',
+  fontSize: 'var(--text-supporting-size)',
 }
 
 export default function AppNav({ onLogout }) {
@@ -65,7 +68,7 @@ export default function AppNav({ onLogout }) {
         <Wordmark />
         {NAV_ITEMS.map((item) => (
           <NavLink key={item.key} to={item.to} end={item.to === '/'} style={({ isActive }) => ({
-            ...itemStyle({ active: isActive, disabled: item.disabled }),
+            ...itemStyle({ active: isActive }),
             fontSize: 'var(--text-label-size)',
           })}>
             {item.label}
@@ -96,24 +99,20 @@ export default function AppNav({ onLogout }) {
     >
       {NAV_ITEMS.map((item) => (
         <NavLink key={item.key} to={item.to} end={item.to === '/'} style={({ isActive }) => ({
-          ...itemStyle({ active: isActive, disabled: item.disabled }),
-          flex: 1,
-          flexDirection: 'column',
-          gap: 2,
-          padding: 'var(--spacing-2) 0',
-          fontSize: 'var(--text-supporting-size)',
+          ...itemStyle({ active: isActive }),
+          ...mobileItemStyle,
         })}>
           {({ isActive }) => (
             <>
               <span
                 style={{
-                  width: 6,
-                  height: 6,
+                  width: 'var(--spacing-1-5)',
+                  height: 'var(--spacing-1-5)',
                   borderRadius: 'var(--radius-full)',
                   background: isActive ? 'var(--color-accent)' : 'transparent',
                 }}
               />
-              {item.label}
+              {item.mobileLabel ?? item.label}
             </>
           )}
         </NavLink>
@@ -122,19 +121,15 @@ export default function AppNav({ onLogout }) {
         type="button"
         onClick={onLogout}
         style={{
-          ...itemStyle({ active: false, disabled: false }),
-          flex: 1,
-          flexDirection: 'column',
-          gap: 2,
-          padding: 'var(--spacing-2) 0',
-          fontSize: 'var(--text-supporting-size)',
+          ...itemStyle({ active: false }),
+          ...mobileItemStyle,
           background: 'none',
           border: 'none',
           fontFamily: 'inherit',
           cursor: 'pointer',
         }}
       >
-        <span style={{ width: 6, height: 6, borderRadius: 'var(--radius-full)', background: 'transparent' }} />
+        <span style={{ width: 'var(--spacing-1-5)', height: 'var(--spacing-1-5)', borderRadius: 'var(--radius-full)', background: 'transparent' }} />
         Log out
       </button>
     </nav>

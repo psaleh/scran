@@ -6,6 +6,7 @@ import { Dialog } from '@astryxdesign/core/Dialog'
 import { IconButton } from '@astryxdesign/core/IconButton'
 
 import { uploadMany } from '../api.js'
+import DialogFrame from './DialogFrame.jsx'
 
 const MAX_PHOTOS = 8 // matches MAX_IMPORT_PHOTOS on the server
 
@@ -83,17 +84,10 @@ export default function ImportPhotosDialog({ isOpen, onOpenChange }) {
 
   return (
     <Dialog isOpen={isOpen} onOpenChange={close} purpose="form">
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-4)', padding: 'var(--spacing-2)' }}>
-        <div>
-          <h2 style={{ margin: 0, fontSize: 'var(--text-heading-2-size)', fontWeight: 'var(--text-heading-2-weight)', color: 'var(--color-text-primary)' }}>
-            Import from photo
-          </h2>
-          <p style={{ margin: 'var(--spacing-1) 0 0', fontSize: 'var(--font-size-base)', color: 'var(--color-text-secondary)' }}>
-            Photograph the cookbook or magazine pages for one recipe — add a
-            photo per page if it runs over. The AI reads them and a draft
-            appears in the import inbox for you to review.
-          </p>
-        </div>
+      <DialogFrame
+        title="Import from photo"
+        description="Photograph the cookbook or magazine pages for one recipe — add a photo per page if it runs over. The AI reads them and a draft appears in the import inbox for you to review."
+      >
         {error && <Banner status="error" title={error} />}
 
         <input
@@ -148,7 +142,7 @@ export default function ImportPhotosDialog({ isOpen, onOpenChange }) {
             isDisabled={busy || files.length === 0}
           />
         </div>
-      </div>
+      </DialogFrame>
     </Dialog>
   )
 }

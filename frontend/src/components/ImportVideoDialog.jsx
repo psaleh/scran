@@ -6,6 +6,7 @@ import { Dialog } from '@astryxdesign/core/Dialog'
 import { TextInput } from '@astryxdesign/core/TextInput'
 
 import { api } from '../api.js'
+import DialogFrame from './DialogFrame.jsx'
 
 /**
  * "Import from YouTube" dialog: paste a video link, the server queues an AI
@@ -47,19 +48,11 @@ export default function ImportVideoDialog({ isOpen, onOpenChange }) {
 
   return (
     <Dialog isOpen={isOpen} onOpenChange={close} purpose="form">
-      <div
-        style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-4)', padding: 'var(--spacing-2)' }}
+      <DialogFrame
+        title="Import from YouTube"
+        description="Paste a link to a cooking video. The AI watches it and drafts the recipe — the draft appears in the import inbox for review."
         onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); doImport() } }}
       >
-        <div>
-          <h2 style={{ margin: 0, fontSize: 'var(--text-heading-2-size)', fontWeight: 'var(--text-heading-2-weight)', color: 'var(--color-text-primary)' }}>
-            Import from YouTube
-          </h2>
-          <p style={{ margin: 'var(--spacing-1) 0 0', fontSize: 'var(--font-size-base)', color: 'var(--color-text-secondary)' }}>
-            Paste a link to a cooking video. The AI watches it and drafts the
-            recipe — the draft appears in the import inbox for review.
-          </p>
-        </div>
         {error && <Banner status="error" title={error} />}
         <TextInput
           label="YouTube video URL"
@@ -72,7 +65,7 @@ export default function ImportVideoDialog({ isOpen, onOpenChange }) {
           <Button label="Cancel" variant="ghost" onClick={() => close(false)} isDisabled={busy} />
           <Button label={busy ? 'Queueing…' : 'Import'} variant="primary" clickAction={doImport} isDisabled={busy || !url.trim()} />
         </div>
-      </div>
+      </DialogFrame>
     </Dialog>
   )
 }

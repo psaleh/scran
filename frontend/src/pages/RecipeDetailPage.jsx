@@ -17,14 +17,8 @@ import ExportRecipeDialog from '../components/ExportRecipeDialog.jsx'
 import ConfirmDialog from '../components/ConfirmDialog.jsx'
 import TagBadge from '../components/TagBadge.jsx'
 import { useToast } from '../components/Toaster.jsx'
-import { sectionLabelStyle, stepNumberStyle } from '../styles.js'
+import { formatAmount, sectionLabelStyle, stepNumberStyle } from '../styles.js'
 import { useIsDesktop } from '../useIsDesktop.js'
-
-// Display-only scaling (spec §3.1): stored amounts are never changed.
-function formatAmount(n) {
-  if (n == null) return null
-  return String(Math.round(n * 100) / 100)
-}
 
 function IngredientRow({ ingredient, scale, onAdd, added }) {
   const amount =
@@ -117,19 +111,19 @@ function NoteRow({ note, currentUser, onChanged }) {
       <Avatar name={note.author} size="small" />
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 'var(--spacing-2)' }}>
-          <span style={{ fontSize: 'var(--font-size-base)', fontWeight: 'var(--font-weight-semibold)', color: 'var(--color-text-primary)' }}>
+          <span style={{ fontSize: 'var(--text-label-size)', fontWeight: 'var(--font-weight-semibold)', color: 'var(--color-text-primary)' }}>
             {note.author}
           </span>
           <span style={{ fontSize: 'var(--text-supporting-size)', color: 'var(--color-text-secondary)' }}>
             {new Date(note.created_at + 'Z').toLocaleString()}
           </span>
         </div>
-        <div style={{ fontSize: 'var(--font-size-lg)', lineHeight: 1.5, color: 'var(--color-text-primary)', marginTop: 2, whiteSpace: 'pre-wrap' }}>
+        <div style={{ fontSize: 'var(--text-large-size)', lineHeight: 1.5, color: 'var(--color-text-primary)', marginTop: 'var(--spacing-0-5)', whiteSpace: 'pre-wrap' }}>
           {renderNoteText(note.text)}
         </div>
       </div>
       {canModify && (
-        <div style={{ display: 'flex', gap: 2, flexShrink: 0 }}>
+        <div style={{ display: 'flex', gap: 'var(--spacing-0-5)', flexShrink: 0 }}>
           <IconButton label="Edit note" icon={<span>✎</span>} variant="ghost" size="sm" onClick={() => setEditing(true)} />
           <IconButton label="Delete note" icon={<span>×</span>} variant="ghost" size="sm" onClick={() => setDeleteOpen(true)} />
         </div>
@@ -179,7 +173,7 @@ function NotesSection({ recipe, currentUser, onChanged }) {
 
       <Card padding={0} style={{ padding: '0 var(--spacing-3)' }}>
         {recipe.notes.length === 0 && (
-          <div style={{ padding: 'var(--spacing-3) 0', fontSize: 'var(--font-size-base)', color: 'var(--color-text-secondary)' }}>
+          <div style={{ padding: 'var(--spacing-3) 0', fontSize: 'var(--text-body-size)', color: 'var(--color-text-secondary)' }}>
             No notes yet.
           </div>
         )}
@@ -325,7 +319,7 @@ export default function RecipeDetailPage({ currentUser }) {
           {recipe.photo_path ? (
             <img src={`/api/uploads/${recipe.photo_path}`} alt={recipe.title} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
           ) : (
-            <span style={{ fontFamily: 'var(--font-family-code)', fontSize: 'var(--font-size-sm)', color: 'var(--color-text-secondary)' }}>
+            <span style={{ fontFamily: 'var(--font-family-code)', fontSize: 'var(--text-supporting-size)', color: 'var(--color-text-secondary)' }}>
               no photo yet
             </span>
           )}
@@ -384,7 +378,7 @@ export default function RecipeDetailPage({ currentUser }) {
         )}
 
         {recipe.description && (
-          <p style={{ margin: 0, fontSize: 'var(--font-size-lg)', lineHeight: 1.5, color: 'var(--color-text-primary)' }}>
+          <p style={{ margin: 0, fontSize: 'var(--text-large-size)', lineHeight: 1.5, color: 'var(--color-text-primary)' }}>
             {recipe.description}
           </p>
         )}
@@ -469,7 +463,7 @@ export default function RecipeDetailPage({ currentUser }) {
       {recipe.steps.map((step, i) => (
         <div key={i} style={{ display: 'flex', gap: 'var(--spacing-3)', padding: 'var(--spacing-3) 0' }}>
           <div style={stepNumberStyle}>{i + 1}</div>
-          <div style={{ fontSize: 'var(--font-size-lg)', lineHeight: 1.5, color: 'var(--color-text-primary)', paddingTop: 3 }}>
+          <div style={{ fontSize: 'var(--text-large-size)', lineHeight: 1.5, color: 'var(--color-text-primary)', paddingTop: 3 }}>
             {step}
           </div>
         </div>

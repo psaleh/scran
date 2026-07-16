@@ -6,6 +6,7 @@ import { Dialog } from '@astryxdesign/core/Dialog'
 import { TextArea } from '@astryxdesign/core/TextArea'
 
 import { api } from '../api.js'
+import DialogFrame from './DialogFrame.jsx'
 
 /**
  * "Import recipe data" dialog: the paste-and-import counterpart to Export
@@ -64,16 +65,10 @@ export default function ImportDataDialog({ isOpen, onOpenChange }) {
 
   return (
     <Dialog isOpen={isOpen} onOpenChange={close} purpose="form">
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-4)', padding: 'var(--spacing-2)' }}>
-        <div>
-          <h2 style={{ margin: 0, fontSize: 'var(--text-heading-2-size)', fontWeight: 'var(--text-heading-2-weight)', color: 'var(--color-text-primary)' }}>
-            Import recipe data
-          </h2>
-          <p style={{ margin: 'var(--spacing-1) 0 0', fontSize: 'var(--font-size-base)', color: 'var(--color-text-secondary)' }}>
-            Paste recipe data exported from another Scran instance, or choose
-            a downloaded file. It's saved as a draft you can review here.
-          </p>
-        </div>
+      <DialogFrame
+        title="Import recipe data"
+        description="Paste recipe data exported from another Scran instance, or choose a downloaded file. It's saved as a draft you can review here."
+      >
         {error && <Banner status="error" title={error} />}
 
         <input ref={fileInput} type="file" accept="application/json" onChange={loadFile} style={{ display: 'none' }} />
@@ -95,7 +90,7 @@ export default function ImportDataDialog({ isOpen, onOpenChange }) {
           <Button label="Cancel" variant="ghost" onClick={() => close(false)} isDisabled={busy} />
           <Button label={busy ? 'Importing…' : 'Import'} variant="primary" clickAction={doImport} isDisabled={busy || !text.trim()} />
         </div>
-      </div>
+      </DialogFrame>
     </Dialog>
   )
 }

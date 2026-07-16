@@ -6,6 +6,7 @@ import { Dialog } from '@astryxdesign/core/Dialog'
 import { TextInput } from '@astryxdesign/core/TextInput'
 
 import { api } from '../api.js'
+import DialogFrame from './DialogFrame.jsx'
 
 /**
  * "Import from website" dialog (spec §3.3.2): paste a URL, the server parses
@@ -71,19 +72,11 @@ export default function ImportUrlDialog({ isOpen, onOpenChange }) {
 
   return (
     <Dialog isOpen={isOpen} onOpenChange={close} purpose="form">
-      <div
-        style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-4)', padding: 'var(--spacing-2)' }}
+      <DialogFrame
+        title="Import from website"
+        description="Paste a link to a recipe page. You'll get a chance to review and edit everything before saving."
         onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); doImport() } }}
       >
-        <div>
-          <h2 style={{ margin: 0, fontSize: 'var(--text-heading-2-size)', fontWeight: 'var(--text-heading-2-weight)', color: 'var(--color-text-primary)' }}>
-            Import from website
-          </h2>
-          <p style={{ margin: 'var(--spacing-1) 0 0', fontSize: 'var(--font-size-base)', color: 'var(--color-text-secondary)' }}>
-            Paste a link to a recipe page. You'll get a chance to review and
-            edit everything before saving.
-          </p>
-        </div>
         {error && <Banner status="error" title={error} />}
         {offerAi && (
           <Banner
@@ -106,7 +99,7 @@ export default function ImportUrlDialog({ isOpen, onOpenChange }) {
           )}
           <Button label={busy ? 'Fetching…' : 'Import'} variant="primary" clickAction={doImport} isDisabled={busy || !url.trim()} />
         </div>
-      </div>
+      </DialogFrame>
     </Dialog>
   )
 }

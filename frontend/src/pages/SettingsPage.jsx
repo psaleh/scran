@@ -14,6 +14,7 @@ import { TextInput } from '@astryxdesign/core/TextInput'
 
 import { api } from '../api.js'
 import ConfirmDialog from '../components/ConfirmDialog.jsx'
+import DialogFrame from '../components/DialogFrame.jsx'
 import { useToast } from '../components/Toaster.jsx'
 import { useIsDesktop } from '../useIsDesktop.js'
 
@@ -25,20 +26,9 @@ const rowStyle = {
   gap: 'var(--spacing-3)',
   padding: 'var(--spacing-3) var(--spacing-4)',
 }
-const rowTextStyle = { flex: 1, fontSize: 'var(--font-size-lg)', color: 'var(--color-text-primary)' }
-const hintStyle = { fontSize: 'var(--font-size-sm)', color: 'var(--color-text-secondary)' }
+const rowTextStyle = { flex: 1, fontSize: 'var(--text-large-size)', color: 'var(--color-text-primary)' }
+const hintStyle = { fontSize: 'var(--text-supporting-size)', color: 'var(--color-text-secondary)' }
 const sectionSpinnerStyle = { display: 'flex', justifyContent: 'center', padding: 'var(--spacing-6)' }
-
-function DialogFrame({ title, children }) {
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-4)', padding: 'var(--spacing-2)' }}>
-      <h2 style={{ margin: 0, fontSize: 'var(--text-heading-2-size)', fontWeight: 'var(--text-heading-2-weight)', color: 'var(--color-text-primary)' }}>
-        {title}
-      </h2>
-      {children}
-    </div>
-  )
-}
 
 // --- AI profiles ------------------------------------------------------------
 
@@ -322,9 +312,9 @@ function StoresSection() {
               <div key={catId}>
                 {i > 0 && <Divider />}
                 <div style={rowStyle}>
-                  <span style={{ fontSize: 'var(--text-supporting-size)', color: 'var(--color-text-secondary)', width: 20 }}>{i + 1}</span>
+                  <span style={{ fontSize: 'var(--text-supporting-size)', color: 'var(--color-text-secondary)', width: 'var(--spacing-5)' }}>{i + 1}</span>
                   <span style={rowTextStyle}>{categoryName[catId] || '?'}</span>
-                  <div style={{ display: 'flex', gap: 2 }}>
+                  <div style={{ display: 'flex', gap: 'var(--spacing-0-5)' }}>
                     <IconButton label="Move up" icon={<span>↑</span>} variant="ghost" size="sm" isDisabled={i === 0} onClick={() => move(i, -1)} />
                     <IconButton label="Move down" icon={<span>↓</span>} variant="ghost" size="sm" isDisabled={i === selected.category_order.length - 1} onClick={() => move(i, 1)} />
                   </div>
@@ -597,7 +587,7 @@ function AuthSection() {
         description="These values come from the container's environment (SCRAN_AUTH_*) and are shown here for reference. See docker-compose.yml."
       />
       <Card padding={4}>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-2)', fontSize: 'var(--font-size-base)', color: 'var(--color-text-primary)' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-2)', fontSize: 'var(--text-body-size)', color: 'var(--color-text-primary)' }}>
           <div>Trust reverse-proxy identity header (SSO): <strong>{info.trust_header ? 'on' : 'off'}</strong></div>
           <div>Header name: <strong>{info.header_name}</strong></div>
           <div>Trusted proxy IPs: <strong>{info.trusted_proxy_ips.length ? info.trusted_proxy_ips.join(', ') : '—'}</strong></div>

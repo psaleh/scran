@@ -20,6 +20,7 @@ import { api, upload } from '../api.js'
 import { sectionLabelStyle, stepNumberStyle } from '../styles.js'
 import { useIsDesktop } from '../useIsDesktop.js'
 import ConfirmDialog from '../components/ConfirmDialog.jsx'
+import DialogFrame from '../components/DialogFrame.jsx'
 import { useToast } from '../components/Toaster.jsx'
 import { SuggestionDropdown, useSuggestionKeyboard } from '../components/SuggestionDropdown.jsx'
 
@@ -121,7 +122,7 @@ function DragHandle({ handleProps }) {
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        width: 20,
+        width: 'var(--spacing-5)',
         flexShrink: 0,
         cursor: 'grab',
         color: 'var(--color-text-secondary)',
@@ -728,15 +729,10 @@ export default function RecipeEditorPage({ currentUser }) {
 
       {/* "Save as new version" label prompt */}
       <Dialog isOpen={versionDialogOpen} onOpenChange={setVersionDialogOpen} purpose="form">
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-4)', padding: 'var(--spacing-2)' }}>
-          <div>
-            <h2 style={{ margin: 0, fontSize: 'var(--text-heading-2-size)', fontWeight: 'var(--text-heading-2-weight)', color: 'var(--color-text-primary)' }}>
-              Save as new version
-            </h2>
-            <p style={{ margin: 'var(--spacing-1) 0 0', fontSize: 'var(--font-size-base)', color: 'var(--color-text-secondary)' }}>
-              The original recipe is kept; your edits become a new version alongside it.
-            </p>
-          </div>
+        <DialogFrame
+          title="Save as new version"
+          description="The original recipe is kept; your edits become a new version alongside it."
+        >
           <TextInput
             label="Version name"
             value={versionLabel}
@@ -748,7 +744,7 @@ export default function RecipeEditorPage({ currentUser }) {
             <Button label="Cancel" variant="ghost" onClick={() => setVersionDialogOpen(false)} isDisabled={saveBusy} />
             <Button label="Save version" variant="primary" clickAction={saveAsVersion} isLoading={saveBusy} />
           </div>
-        </div>
+        </DialogFrame>
       </Dialog>
 
       {/* Delete confirmation: irreversible, so require an explicit confirm click */}
@@ -815,7 +811,7 @@ export default function RecipeEditorPage({ currentUser }) {
                       margin: 0,
                       padding: 'var(--spacing-2) 0',
                       whiteSpace: 'pre-wrap',
-                      fontSize: 'var(--font-size-sm)',
+                      fontSize: 'var(--text-supporting-size)',
                       color: 'var(--color-text-secondary)',
                     }}
                   >
@@ -863,7 +859,7 @@ export default function RecipeEditorPage({ currentUser }) {
               {photoSrc ? (
                 <img src={photoSrc} alt="Recipe" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
               ) : (
-                <span style={{ fontFamily: 'var(--font-family-code)', fontSize: 'var(--font-size-sm)', color: 'var(--color-text-secondary)' }}>
+                <span style={{ fontFamily: 'var(--font-family-code)', fontSize: 'var(--text-supporting-size)', color: 'var(--color-text-secondary)' }}>
                   tap to upload photo
                 </span>
               )}
@@ -914,7 +910,7 @@ export default function RecipeEditorPage({ currentUser }) {
                       key={t}
                       variant="neutral"
                       label={
-                        <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                        <span style={{ display: 'flex', alignItems: 'center', gap: 'var(--spacing-1)' }}>
                           {t}
                           <IconButton
                             label={`Remove tag ${t}`}

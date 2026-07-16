@@ -61,7 +61,7 @@ function RecipeCard({ recipe }) {
         <div style={{ padding: 'var(--spacing-3)', display: 'flex', flexDirection: 'column', gap: 'var(--spacing-2)' }}>
           <div
             style={{
-              fontSize: 'var(--font-size-lg)',
+              fontSize: 'var(--text-large-size)',
               fontWeight: 'var(--font-weight-semibold)',
               color: 'var(--color-text-primary)',
               overflow: 'hidden',
