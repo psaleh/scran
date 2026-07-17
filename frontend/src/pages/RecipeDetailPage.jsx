@@ -1,9 +1,10 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { Avatar } from '@astryxdesign/core/Avatar'
 import { Badge } from '@astryxdesign/core/Badge'
 import { Button } from '@astryxdesign/core/Button'
 import { Card } from '@astryxdesign/core/Card'
+import { Dialog } from '@astryxdesign/core/Dialog'
 import { Divider } from '@astryxdesign/core/Divider'
 import { EmptyState } from '@astryxdesign/core/EmptyState'
 import { IconButton } from '@astryxdesign/core/IconButton'
@@ -13,6 +14,7 @@ import { TextArea } from '@astryxdesign/core/TextArea'
 import { ToggleButton } from '@astryxdesign/core/ToggleButton'
 
 import { api } from '../api.js'
+import DialogFrame from '../components/DialogFrame.jsx'
 import ExportRecipeDialog from '../components/ExportRecipeDialog.jsx'
 import ConfirmDialog from '../components/ConfirmDialog.jsx'
 import TagBadge from '../components/TagBadge.jsx'
@@ -144,8 +146,56 @@ function NoteRow({ note, currentUser, onChanged }) {
   )
 }
 
+// Pre-filled dialog for the "I cooked this" shortcut — posts to the same
+// notes endpoint as the inline add box, just with a default message the
+// user can extend before saving.
+function CookedThisDialog({ recipeId, isOpen, onOpenChange, onSaved }) {
+  const [detail, setDetail] = useState('')
+  const [saving, setSaving] = useState(false)
+  const toast = useToast()
+
+  useEffect(() => {
+    if (isOpen) setDetail('')
+  }, [isOpen])
+
+  const save = async () => {
+    setSaving(true)
+    try {
+      const text = detail.trim() ? `Cooked this — ${detail.trim()}` : 'Cooked this'
+      await api(`/api/recipes/${recipeId}/notes`, { method: 'POST', body: { text } })
+      onOpenChange(false)
+      onSaved()
+      toast.success('Note added')
+    } catch (err) {
+      toast.error(err.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <Dialog isOpen={isOpen} onOpenChange={onOpenChange} purpose="form">
+      <DialogFrame title="Cooked this 🍳" description="Add any detail worth remembering next time — or just save as-is.">
+        <TextArea
+          label="Detail (optional)"
+          isLabelHidden
+          value={detail}
+          onChange={setDetail}
+          rows={2}
+          placeholder="e.g. swapped cream for yoghurt"
+        />
+        <div style={{ display: 'flex', gap: 'var(--spacing-2)', justifyContent: 'flex-end' }}>
+          <Button label="Cancel" variant="ghost" onClick={() => onOpenChange(false)} isDisabled={saving} />
+          <Button label="Save" variant="primary" clickAction={save} isLoading={saving} />
+        </div>
+      </DialogFrame>
+    </Dialog>
+  )
+}
+
 function NotesSection({ recipe, currentUser, onChanged }) {
   const [draft, setDraft] = useState('')
+  const [cookedOpen, setCookedOpen] = useState(false)
   const toast = useToast()
 
   const save = async () => {
@@ -161,7 +211,11 @@ function NotesSection({ recipe, currentUser, onChanged }) {
 
   return (
     <div>
-      <span style={sectionLabelStyle}>Notes</span>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <span style={sectionLabelStyle}>Notes</span>
+        <Button label="I cooked this" icon={<span>🍳</span>} variant="secondary" size="sm" onClick={() => setCookedOpen(true)} />
+      </div>
+      <CookedThisDialog recipeId={recipe.id} isOpen={cookedOpen} onOpenChange={setCookedOpen} onSaved={onChanged} />
 
       {/* Inline add box — no navigation, no edit mode (spec §3.1.1). */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-2)', marginTop: 'var(--spacing-3)', marginBottom: 'var(--spacing-2)' }}>
@@ -200,7 +254,10 @@ export default function RecipeDetailPage({ currentUser }) {
   // Ingredient ids briefly shown with a ✓ after being sent to the list.
   const [addedIds, setAddedIds] = useState({})
   const [exportOpen, setExportOpen] = useState(false)
+  const [cookMode, setCookMode] = useState(false)
+  const wakeLockRef = useRef(null)
   const toast = useToast()
+  const wakeLockSupported = 'wakeLock' in navigator
 
   const load = () => {
     api(`/api/recipes/${id}`)
@@ -216,6 +273,39 @@ export default function RecipeDetailPage({ currentUser }) {
     setRecipe(null)
     load()
   }, [id])
+
+  // Cook mode: keep the screen awake while the recipe is on-screen. The
+  // lock is released automatically by the browser when the tab goes
+  // background, so it must be re-acquired on visibilitychange or it stays
+  // off for the rest of the cook after a quick screen-off/on.
+  useEffect(() => {
+    if (!wakeLockSupported || !cookMode) return
+    let cancelled = false
+    const acquire = async () => {
+      try {
+        const lock = await navigator.wakeLock.request('screen')
+        if (cancelled) {
+          lock.release()
+          return
+        }
+        wakeLockRef.current = lock
+      } catch {
+        // Can fail if the tab isn't visible or the OS refuses — the toggle
+        // stays on and re-acquire is retried on the next visibilitychange.
+      }
+    }
+    acquire()
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'visible' && !wakeLockRef.current) acquire()
+    }
+    document.addEventListener('visibilitychange', onVisibilityChange)
+    return () => {
+      cancelled = true
+      document.removeEventListener('visibilitychange', onVisibilityChange)
+      wakeLockRef.current?.release()
+      wakeLockRef.current = null
+    }
+  }, [cookMode, wakeLockSupported])
 
   if (error) return <EmptyState title="Recipe not found" description={error} actions={<Button label="Back to recipes" onClick={() => navigate('/')} />} />
   if (recipe === null) {
@@ -387,7 +477,19 @@ export default function RecipeDetailPage({ currentUser }) {
           <span style={{ fontSize: 'var(--font-size-xl)', fontWeight: 'var(--font-weight-medium)', color: 'var(--color-text-primary)' }}>
             Servings
           </span>
-          <NumberInput label="Servings" isLabelHidden value={servings} onChange={setServings} min={1} max={24} />
+          <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--spacing-2)' }}>
+            {wakeLockSupported && (
+              <ToggleButton
+                label={cookMode ? 'Cook mode on — screen stays awake' : 'Cook mode — keep screen awake'}
+                icon={<span>◌</span>}
+                pressedIcon={<span>☀</span>}
+                isIconOnly
+                isPressed={cookMode}
+                onPressedChange={setCookMode}
+              />
+            )}
+            <NumberInput label="Servings" isLabelHidden value={servings} onChange={setServings} min={1} max={24} />
+          </div>
         </div>
       </div>
 
