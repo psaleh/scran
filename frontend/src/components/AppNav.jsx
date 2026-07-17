@@ -7,7 +7,8 @@ import { useIsDesktop } from '../useIsDesktop.js'
 const NAV_ITEMS = [
   { key: 'recipes', label: 'Recipes', to: '/' },
   { key: 'shopping', label: 'Shopping list', mobileLabel: 'Shopping', to: '/shopping' },
-  { key: 'inbox', label: 'Import inbox', to: '/inbox' },
+  { key: 'meat-temps', label: 'Meat temps', mobileLabel: 'Temps', to: '/meat-temps' },
+  { key: 'inbox', label: 'Import inbox', mobileLabel: 'Inbox', to: '/inbox' },
   { key: 'settings', label: 'Settings', to: '/settings' },
 ]
 

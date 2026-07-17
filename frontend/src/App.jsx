@@ -9,6 +9,7 @@ import AppNav from './components/AppNav.jsx'
 import LoginPage from './pages/LoginPage.jsx'
 import BrowsePage from './pages/BrowsePage.jsx'
 import InboxPage from './pages/InboxPage.jsx'
+import MeatTempsPage from './pages/MeatTempsPage.jsx'
 import RecipeDetailPage from './pages/RecipeDetailPage.jsx'
 import RecipeEditorPage from './pages/RecipeEditorPage.jsx'
 import SettingsPage from './pages/SettingsPage.jsx'
@@ -32,6 +33,7 @@ function Shell({ user, onLogout }) {
             <Route path="/recipes/:id" element={<RecipeDetailPage currentUser={user} />} />
             <Route path="/recipes/:id/edit" element={<RecipeEditorPage currentUser={user} />} />
             <Route path="/shopping" element={<ShoppingListPage />} />
+            <Route path="/meat-temps" element={<MeatTempsPage />} />
             <Route path="/inbox" element={<InboxPage />} />
             <Route path="/settings" element={<SettingsPage currentUser={user} />} />
           </Routes>
