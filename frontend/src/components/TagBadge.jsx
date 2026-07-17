@@ -12,6 +12,17 @@ function variantFor(tag) {
   return VARIANTS[hash % VARIANTS.length]
 }
 
-export default function TagBadge({ tag }) {
-  return <Badge label={tag} variant={variantFor(tag)} />
+export default function TagBadge({ tag, onClick }) {
+  const badge = <Badge label={tag} variant={variantFor(tag)} />
+  if (!onClick) return badge
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label={`Filter by tag ${tag}`}
+      style={{ padding: 0, background: 'none', border: 'none', cursor: 'pointer', display: 'inline-flex' }}
+    >
+      {badge}
+    </button>
+  )
 }

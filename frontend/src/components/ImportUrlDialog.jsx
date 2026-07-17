@@ -62,7 +62,7 @@ export default function ImportUrlDialog({ isOpen, onOpenChange }) {
       onOpenChange(false)
       setUrl('')
       setOfferAi(false)
-      navigate('/inbox')
+      navigate('/settings?tab=inbox')
     } catch (err) {
       setError(err.message)
     } finally {

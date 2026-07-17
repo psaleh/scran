@@ -478,13 +478,10 @@ export default function ShoppingListPage() {
         {/* Header: title, store selector, add bar */}
         <div style={{ background: 'var(--color-background-surface)', borderBottom: '1px solid var(--color-border)', flexShrink: 0 }}>
           <div style={{ padding: 'var(--spacing-4)', paddingBottom: 'var(--spacing-3)', display: 'flex', flexDirection: 'column', gap: 'var(--spacing-3)' }}>
-            <h1 style={{ margin: 0, fontSize: 'var(--text-heading-1-size)', fontWeight: 'var(--text-heading-1-weight)', color: 'var(--color-text-primary)' }}>
-              Shopping list
-            </h1>
             {/* List tabs (hidden with a single list). Each tab is also a drop
                 target: dragging an item's ⠿ handle onto a tab moves it there. */}
             {showTabs && (
-              <div style={{ overflowX: 'auto' }}>
+              <div className="hide-scrollbar" style={{ overflowX: 'auto' }}>
                 <TabList value={String(activeListId)} onChange={(v) => selectList(Number(v))}>
                   {lists.map((l) => (
                     <Tab

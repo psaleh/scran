@@ -312,20 +312,15 @@ export default function MeatTempsPage() {
       >
         <div style={{ maxWidth: 720, margin: '0 auto' }}>
           <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 'var(--spacing-3)' }}>
-            <div>
-              <h1 style={{ margin: 0, fontSize: 'var(--text-heading-1-size)', fontWeight: 'var(--text-heading-1-weight)', color: 'var(--color-text-primary)' }}>
-                Meat temps
-              </h1>
-              <p style={{ margin: 'var(--spacing-1) 0 0', ...hintStyle }}>
-                How long to hold a temperature to make meat safe.
-              </p>
-            </div>
+            <p style={{ margin: 0, alignSelf: 'center', ...hintStyle }}>
+              How long to hold a temperature to make meat safe.
+            </p>
             <SegmentedControl label="Temperature unit" size="sm" value={unit} onChange={selectUnit}>
               <SegmentedControlItem value="C" label="°C" />
               <SegmentedControlItem value="F" label="°F" />
             </SegmentedControl>
           </div>
-          <div style={{ overflowX: 'auto', marginTop: 'var(--spacing-3)' }}>
+          <div className="hide-scrollbar" style={{ overflowX: 'auto', marginTop: 'var(--spacing-3)' }}>
             <TabList value={tab} onChange={setTab}>
               {tabs.map((t) => (
                 <Tab key={t.value} value={t.value} label={t.label} />

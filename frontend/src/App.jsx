@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { BrowserRouter, Route, Routes } from 'react-router-dom'
+import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import { Center } from '@astryxdesign/core/Center'
 import { Spinner } from '@astryxdesign/core/Spinner'
 import { LayerProvider } from '@astryxdesign/core/Layer'
@@ -8,7 +8,6 @@ import { api } from './api.js'
 import AppNav from './components/AppNav.jsx'
 import LoginPage from './pages/LoginPage.jsx'
 import BrowsePage from './pages/BrowsePage.jsx'
-import InboxPage from './pages/InboxPage.jsx'
 import MeatTempsPage from './pages/MeatTempsPage.jsx'
 import RecipeDetailPage from './pages/RecipeDetailPage.jsx'
 import RecipeEditorPage from './pages/RecipeEditorPage.jsx'
@@ -25,7 +24,7 @@ function Shell({ user, onLogout }) {
     // (desktop's nav is a top bar, so a small inset is enough there).
     <LayerProvider toast={{ position: 'bottomEnd', inset: { bottom: isDesktop ? 24 : 76 } }}>
       <div style={{ height: '100dvh', display: 'flex', flexDirection: 'column', minHeight: 0, background: 'var(--color-background-body)' }}>
-        {isDesktop && <AppNav onLogout={onLogout} />}
+        {isDesktop && <AppNav />}
         <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
           <Routes>
             <Route path="/" element={<BrowsePage />} />
@@ -34,11 +33,12 @@ function Shell({ user, onLogout }) {
             <Route path="/recipes/:id/edit" element={<RecipeEditorPage currentUser={user} />} />
             <Route path="/shopping" element={<ShoppingListPage />} />
             <Route path="/meat-temps" element={<MeatTempsPage />} />
-            <Route path="/inbox" element={<InboxPage />} />
-            <Route path="/settings" element={<SettingsPage currentUser={user} />} />
+            {/* The inbox moved into Settings; keep old links/bookmarks working. */}
+            <Route path="/inbox" element={<Navigate to="/settings?tab=inbox" replace />} />
+            <Route path="/settings" element={<SettingsPage currentUser={user} onLogout={onLogout} />} />
           </Routes>
         </div>
-        {!isDesktop && <AppNav onLogout={onLogout} />}
+        {!isDesktop && <AppNav />}
       </div>
     </LayerProvider>
   )

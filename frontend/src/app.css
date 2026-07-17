@@ -1,0 +1,21 @@
+/* App-level styles that can't be expressed inline (pseudo-elements). */
+
+/* Horizontally scrollable rows (tab bars) that shouldn't show a scrollbar:
+   content stays swipeable/scrollable, the bar itself is hidden. */
+.hide-scrollbar {
+  scrollbar-width: none; /* Firefox */
+}
+
+.hide-scrollbar::-webkit-scrollbar {
+  display: none; /* Chrome/Safari */
+}
+
+/* The browse power-search bar (chips + input): match Astryx's input focus
+   treatment, which inline styles can't express (:focus-within). */
+.search-bar:focus-within {
+  border-color: var(--color-accent);
+}
+
+.search-bar input::placeholder {
+  color: var(--color-text-secondary);
+}

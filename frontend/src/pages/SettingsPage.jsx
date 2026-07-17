@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { Avatar } from '@astryxdesign/core/Avatar'
 import { Badge } from '@astryxdesign/core/Badge'
 import { Banner } from '@astryxdesign/core/Banner'
@@ -8,15 +9,18 @@ import { CheckboxInput } from '@astryxdesign/core/CheckboxInput'
 import { Dialog } from '@astryxdesign/core/Dialog'
 import { Divider } from '@astryxdesign/core/Divider'
 import { IconButton } from '@astryxdesign/core/IconButton'
+import { SegmentedControl, SegmentedControlItem } from '@astryxdesign/core/SegmentedControl'
 import { Spinner } from '@astryxdesign/core/Spinner'
-import { TabList, Tab } from '@astryxdesign/core/TabList'
+import { TabList, Tab, TabMenu } from '@astryxdesign/core/TabList'
 import { TextInput } from '@astryxdesign/core/TextInput'
 
 import { api } from '../api.js'
+import InboxSection from './InboxSection.jsx'
 import ConfirmDialog from '../components/ConfirmDialog.jsx'
 import DialogFrame from '../components/DialogFrame.jsx'
 import { useToast } from '../components/Toaster.jsx'
 import { useIsDesktop } from '../useIsDesktop.js'
+import { useThemeMode } from '../themeMode.js'
 
 // Shared bits ---------------------------------------------------------------
 
@@ -668,6 +672,29 @@ function UsersSection({ currentUser }) {
   )
 }
 
+// --- Appearance -----------------------------------------------------------------
+
+function AppearanceSection() {
+  const { mode, setMode } = useThemeMode()
+  return (
+    <Card padding={4}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-2)' }}>
+        <span style={{ fontSize: 'var(--text-label-size)', fontWeight: 'var(--font-weight-medium)', color: 'var(--color-text-primary)' }}>
+          Colour mode
+        </span>
+        <SegmentedControl label="Colour mode" value={mode} onChange={setMode}>
+          <SegmentedControlItem value="system" label="System" />
+          <SegmentedControlItem value="light" label="Light" />
+          <SegmentedControlItem value="dark" label="Dark" />
+        </SegmentedControl>
+        <span style={hintStyle}>
+          System follows this device's light/dark preference. Applies to this browser only.
+        </span>
+      </div>
+    </Card>
+  )
+}
+
 // --- Auth (read-only, configured via environment) ------------------------------------
 
 function AuthSection() {
@@ -701,23 +728,31 @@ function AuthSection() {
 // --- Page ------------------------------------------------------------------------
 
 /** Settings (spec §6.7): AI profiles, stores, categories, shopping lists, users, auth. */
-export default function SettingsPage({ currentUser }) {
+export default function SettingsPage({ currentUser, onLogout }) {
   const isDesktop = useIsDesktop()
-  const [tab, setTab] = useState('ai')
+  // ?tab=inbox etc. lets import dialogs deep-link straight to a section.
+  const [searchParams] = useSearchParams()
+  const [tab, setTab] = useState(searchParams.get('tab') ?? 'inbox')
+  const [logoutConfirmOpen, setLogoutConfirmOpen] = useState(false)
 
+  // Sections marked inMenu live behind the TabList's "More" dropdown so the
+  // tab row never scrolls content out of sight.
   const sections = [
+    { value: 'inbox', label: 'Import inbox', render: () => <InboxSection /> },
     { value: 'ai', label: 'AI profiles', render: () => <AiProfilesSection /> },
     { value: 'stores', label: 'Stores', render: () => <StoresSection /> },
     { value: 'categories', label: 'Categories', render: () => <CategoriesSection /> },
-    { value: 'lists', label: 'Shopping lists', render: () => <ShoppingListsSection /> },
+    { value: 'lists', label: 'Shopping lists', render: () => <ShoppingListsSection />, inMenu: true },
+    { value: 'appearance', label: 'Appearance', render: () => <AppearanceSection />, inMenu: true },
     ...(currentUser.is_admin
       ? [
-          { value: 'users', label: 'Users', render: () => <UsersSection currentUser={currentUser} /> },
-          { value: 'auth', label: 'Auth', render: () => <AuthSection /> },
+          { value: 'users', label: 'Users', render: () => <UsersSection currentUser={currentUser} />, inMenu: true },
+          { value: 'auth', label: 'Auth', render: () => <AuthSection />, inMenu: true },
         ]
       : []),
   ]
   const section = sections.find((s) => s.value === tab) ?? sections[0]
+  const menuSections = sections.filter((s) => s.inMenu)
 
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
@@ -730,15 +765,18 @@ export default function SettingsPage({ currentUser }) {
         }}
       >
         <div style={{ maxWidth: 720, margin: '0 auto' }}>
-          <h1 style={{ margin: '0 0 var(--spacing-3)', fontSize: 'var(--text-heading-1-size)', fontWeight: 'var(--text-heading-1-weight)', color: 'var(--color-text-primary)' }}>
-            Settings
-          </h1>
-          <div style={{ overflowX: 'auto' }}>
-            <TabList value={section.value} onChange={setTab}>
-              {sections.map((s) => (
-                <Tab key={s.value} value={s.value} label={s.label} />
-              ))}
-            </TabList>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 'var(--spacing-3)' }}>
+            <div className="hide-scrollbar" style={{ overflowX: 'auto' }}>
+              <TabList value={section.value} onChange={setTab}>
+                {sections.filter((s) => !s.inMenu).map((s) => (
+                  <Tab key={s.value} value={s.value} label={s.label} />
+                ))}
+                <TabMenu label="More" options={menuSections.map(({ value, label }) => ({ value, label }))} />
+              </TabList>
+            </div>
+            <div style={{ flexShrink: 0, paddingBottom: 'var(--spacing-2)' }}>
+              <Button label="Log out" variant="secondary" size="sm" onClick={() => setLogoutConfirmOpen(true)} />
+            </div>
           </div>
         </div>
       </div>
@@ -746,6 +784,16 @@ export default function SettingsPage({ currentUser }) {
       <div style={{ flex: 1, overflowY: 'auto', padding: isDesktop ? 'var(--spacing-6)' : 'var(--spacing-4)' }}>
         <div style={{ maxWidth: 720, margin: '0 auto' }}>{section.render()}</div>
       </div>
+
+      <ConfirmDialog
+        isOpen={logoutConfirmOpen}
+        onOpenChange={setLogoutConfirmOpen}
+        title="Log out?"
+        message="You'll need your username and password to sign back in."
+        confirmLabel="Log out"
+        variant="primary"
+        onConfirm={onLogout}
+      />
     </div>
   )
 }

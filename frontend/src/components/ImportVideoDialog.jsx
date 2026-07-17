@@ -38,7 +38,7 @@ export default function ImportVideoDialog({ isOpen, onOpenChange }) {
       await api('/api/import/video', { method: 'POST', body: { url: url.trim() } })
       onOpenChange(false)
       setUrl('')
-      navigate('/inbox')
+      navigate('/settings?tab=inbox')
     } catch (err) {
       setError(err.message)
     } finally {

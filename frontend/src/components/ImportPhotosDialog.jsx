@@ -74,7 +74,7 @@ export default function ImportPhotosDialog({ isOpen, onOpenChange }) {
       files.forEach((f) => URL.revokeObjectURL(f.url))
       setFiles([])
       onOpenChange(false)
-      navigate('/inbox')
+      navigate('/settings?tab=inbox')
     } catch (err) {
       setError(err.message)
     } finally {

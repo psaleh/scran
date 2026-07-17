@@ -611,7 +611,7 @@ export default function RecipeEditorPage({ currentUser }) {
         await api(`/api/recipes/${targetId}`, { method: 'PUT', body: buildBody(status) })
       }
       await api(`/api/recipes/${targetId}/redraft`, { method: 'POST' })
-      navigate('/inbox')
+      navigate('/settings?tab=inbox')
     } catch (err) {
       setError(err.message)
       setTidyBusy(false)

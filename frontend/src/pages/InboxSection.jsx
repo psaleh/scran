@@ -9,9 +9,10 @@ import { Spinner } from '@astryxdesign/core/Spinner'
 import { StatusDot } from '@astryxdesign/core/StatusDot'
 
 import { api } from '../api.js'
-import { useIsDesktop } from '../useIsDesktop.js'
 
-// Layout follows the design mockup ui_kits/recipe-app/import-inbox.html.
+// Layout follows the design mockup ui_kits/recipe-app/import-inbox.html,
+// adapted to render as a section inside the Settings screen (the Settings
+// page owns the scroll container and page chrome).
 
 const POLL_MS = 5000
 
@@ -104,9 +105,9 @@ function JobCard({ job, onRetry, onReview }) {
   )
 }
 
-/** Import inbox (spec §5.2): job list, AI endpoint status, manual retry. */
-export default function InboxPage() {
-  const isDesktop = useIsDesktop()
+/** Import inbox (spec §5.2): job list, AI endpoint status, manual retry.
+ *  Rendered as a Settings section. */
+export default function InboxSection() {
   const navigate = useNavigate()
   const [jobs, setJobs] = useState(null) // null = loading
   const [aiStatus, setAiStatus] = useState(null)
@@ -217,56 +218,37 @@ export default function InboxPage() {
   const reachable = aiStatus?.reachable
 
   return (
-    <div style={{ height: '100%', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-      {/* Header */}
-      <div style={{
-        padding: isDesktop ? 'var(--spacing-4) var(--spacing-6)' : 'var(--spacing-4)',
-        flexShrink: 0,
-        background: 'var(--color-background-surface)',
-        borderBottom: '1px solid var(--color-border)',
-      }}>
-        <div style={{ maxWidth: isDesktop ? 720 : 'none', width: '100%', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 'var(--spacing-3)' }}>
-          <h1 style={{ margin: 0, fontSize: 'var(--text-heading-1-size)', fontWeight: 'var(--text-heading-1-weight)', color: 'var(--color-text-primary)' }}>
-            Import inbox
-          </h1>
-
-          <Card elevation="none" style={{ display: 'flex', alignItems: 'center', gap: 'var(--spacing-2)', background: 'var(--color-background-muted)' }}>
-            <StatusDot
-              variant={reachable ? 'success' : 'error'}
-              label={reachable ? 'Endpoint reachable' : 'Endpoint unreachable'}
-            />
-            <div style={{ display: 'flex', flexDirection: 'column' }}>
-              <span style={{ fontSize: 'var(--text-label-size)', fontWeight: 'var(--font-weight-medium)', color: 'var(--color-text-primary)' }}>
-                {aiStatus?.profile_name || 'No AI profile configured'}
-              </span>
-              <span style={{ fontSize: 'var(--text-supporting-size)', color: 'var(--color-text-secondary)' }}>
-                {aiStatus?.profile_name == null
-                  ? 'Add one in Settings → AI profiles'
-                  : reachable
-                    ? 'Reachable — jobs will process'
-                    : 'Unreachable — jobs queued until it appears'}
-              </span>
-            </div>
-          </Card>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-3)' }}>
+      <Card elevation="none" style={{ display: 'flex', alignItems: 'center', gap: 'var(--spacing-2)', background: 'var(--color-background-muted)' }}>
+        <StatusDot
+          variant={reachable ? 'success' : 'error'}
+          label={reachable ? 'Endpoint reachable' : 'Endpoint unreachable'}
+        />
+        <div style={{ display: 'flex', flexDirection: 'column' }}>
+          <span style={{ fontSize: 'var(--text-label-size)', fontWeight: 'var(--font-weight-medium)', color: 'var(--color-text-primary)' }}>
+            {aiStatus?.profile_name || 'No AI profile configured'}
+          </span>
+          <span style={{ fontSize: 'var(--text-supporting-size)', color: 'var(--color-text-secondary)' }}>
+            {aiStatus?.profile_name == null
+              ? 'Add one in Settings → AI profiles'
+              : reachable
+                ? 'Reachable — jobs will process'
+                : 'Unreachable — jobs queued until it appears'}
+          </span>
         </div>
-      </div>
+      </Card>
 
-      {/* Job list */}
-      <div style={{ flex: 1, overflowY: 'auto', padding: isDesktop ? 'var(--spacing-6)' : 'var(--spacing-4)' }}>
-        <div style={{ maxWidth: isDesktop ? 720 : 'none', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 'var(--spacing-3)' }}>
-          {error && <Banner status="error" title={error} />}
-          {jobs === null ? (
-            <Spinner size="lg" label="Loading" />
-          ) : jobs.length === 0 ? (
-            <EmptyState title="Inbox is empty" description="Photo imports and categorisation jobs will show up here." />
-          ) : (
-            jobs.map((job) => <JobCard key={job.id} job={job} onRetry={retry} onReview={review} />)
-          )}
-          <div>
-            {/* TEMPORARY dev button (stage 2), removed in stage 5. */}
-            <Button label="Enqueue test job" variant="ghost" size="sm" clickAction={enqueueTest} />
-          </div>
-        </div>
+      {error && <Banner status="error" title={error} />}
+      {jobs === null ? (
+        <Spinner size="lg" label="Loading" />
+      ) : jobs.length === 0 ? (
+        <EmptyState title="Inbox is empty" description="Photo imports and categorisation jobs will show up here." />
+      ) : (
+        jobs.map((job) => <JobCard key={job.id} job={job} onRetry={retry} onReview={review} />)
+      )}
+      <div>
+        {/* TEMPORARY dev button (stage 2), removed in stage 5. */}
+        <Button label="Enqueue test job" variant="ghost" size="sm" clickAction={enqueueTest} />
       </div>
     </div>
   )
