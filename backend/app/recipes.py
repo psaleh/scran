@@ -232,10 +232,19 @@ def _get_recipe_or_404(db: sqlite3.Connection, recipe_id: int) -> sqlite3.Row:
 
 # --- Recipe endpoints ----------------------------------------------------------
 
+_SORT_COLUMNS = {
+    "newest": "created_at DESC",
+    "updated": "updated_at DESC",
+    "title": "title COLLATE NOCASE ASC",
+}
+
+
 @router.get("/recipes")
 def list_recipes(
     q: str = "",
     tag: str = "",
+    status: str = "",
+    sort: str = "updated",
     db: sqlite3.Connection = Depends(get_db),
     user=Depends(get_current_user),
 ):
@@ -253,6 +262,9 @@ def list_recipes(
             " WHERE json_each.value = ? COLLATE NOCASE)"
         )
         params.append(tag)
+    if status:
+        where.append("status = ?")
+        params.append(status)
     # Browse shows only the newest version of each recipe group; older
     # versions remain reachable via the detail page's version switcher.
     where.append(
@@ -261,7 +273,7 @@ def list_recipes(
     sql = "SELECT * FROM recipes"
     if where:
         sql += " WHERE " + " AND ".join(where)
-    sql += " ORDER BY updated_at DESC"
+    sql += " ORDER BY " + _SORT_COLUMNS.get(sort, _SORT_COLUMNS["updated"])
     return [_summary(r) for r in db.execute(sql, params)]
 
 

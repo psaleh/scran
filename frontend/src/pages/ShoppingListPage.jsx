@@ -267,11 +267,38 @@ export default function ShoppingListPage() {
     }
   }
 
+  // Undo re-adds a removed item via POST /api/shopping, carrying enough of
+  // its old shape (recipe tag, checked state) to look like it never left.
+  const restoreItems = async (removed) => {
+    try {
+      const created = await Promise.all(
+        removed.map((item) =>
+          api('/api/shopping', {
+            method: 'POST',
+            body: {
+              name: item.name,
+              amount: item.amount,
+              unit: item.unit,
+              note: item.note,
+              category_id: item.category_id,
+              recipe_id: item.recipe_id,
+              checked: item.checked,
+            },
+          }),
+        ),
+      )
+      setItems((list) => [...list, ...created])
+    } catch (err) {
+      toast.error(err.message)
+    }
+  }
+
   const removeItem = async (item) => {
     const previous = items
     setItems((list) => list.filter((i) => i.id !== item.id))
     try {
       await api(`/api/shopping/${item.id}`, { method: 'DELETE' })
+      toast.success(`Removed ${item.name}`, { action: { label: 'Undo', onClick: () => restoreItems([item]) } })
     } catch (err) {
       setItems(previous)
       toast.error(err.message)
@@ -295,11 +322,14 @@ export default function ShoppingListPage() {
 
   const clear = async (checkedOnly) => {
     const previous = items
+    const removed = checkedOnly ? previous.filter((i) => i.checked) : previous
     setClearBusy(true)
     try {
       await api(`/api/shopping/clear?checked_only=${checkedOnly}`, { method: 'POST' })
       setItems((list) => (checkedOnly ? list.filter((i) => !i.checked) : []))
-      toast.success('List cleared')
+      toast.success(`Cleared ${removed.length} item${removed.length === 1 ? '' : 's'}`, {
+        action: { label: 'Undo', onClick: () => restoreItems(removed) },
+      })
     } catch (err) {
       setItems(previous)
       toast.error(err.message)
@@ -496,7 +526,7 @@ export default function ShoppingListPage() {
           title={clearConfirm === 'all' ? 'Clear entire list?' : 'Clear completed items?'}
           message={
             clearConfirm === 'all'
-              ? "This removes every item on the shopping list. This can't be undone."
+              ? 'This removes every item on the shopping list.'
               : 'This removes all checked-off items from the list.'
           }
           confirmLabel={clearConfirm === 'all' ? 'Clear all' : 'Clear completed'}

@@ -5,6 +5,7 @@ import { Button } from '@astryxdesign/core/Button'
 import { Card } from '@astryxdesign/core/Card'
 import { DropdownMenu } from '@astryxdesign/core/DropdownMenu'
 import { EmptyState } from '@astryxdesign/core/EmptyState'
+import { Selector } from '@astryxdesign/core/Selector'
 import { Spinner } from '@astryxdesign/core/Spinner'
 import { TextInput } from '@astryxdesign/core/TextInput'
 import { ToggleButton } from '@astryxdesign/core/ToggleButton'
@@ -93,6 +94,8 @@ export default function BrowsePage() {
   const [photosOpen, setPhotosOpen] = useState(false)
   const [videoOpen, setVideoOpen] = useState(false)
   const [dataImportOpen, setDataImportOpen] = useState(false)
+  const [sort, setSort] = useState('updated')
+  const [draftsOnly, setDraftsOnly] = useState(false)
   const isDesktop = useIsDesktop()
   const navigate = useNavigate()
 
@@ -106,12 +109,14 @@ export default function BrowsePage() {
       const params = new URLSearchParams()
       if (query.trim()) params.set('q', query.trim())
       if (activeTag) params.set('tag', activeTag)
+      if (draftsOnly) params.set('status', 'draft')
+      params.set('sort', sort)
       api(`/api/recipes?${params}`)
         .then(setRecipes)
         .catch((err) => setError(err.message))
     }, 250)
     return () => clearTimeout(timer)
-  }, [query, activeTag])
+  }, [query, activeTag, sort, draftsOnly])
 
   // "Add recipe" menu (spec §6.2): manual entry, website import, or AI
   // photo import.
@@ -124,7 +129,7 @@ export default function BrowsePage() {
   ]
 
   const isFreshInstall =
-    recipes !== null && recipes.length === 0 && !query.trim() && !activeTag
+    recipes !== null && recipes.length === 0 && !query.trim() && !activeTag && !draftsOnly
 
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
@@ -150,30 +155,52 @@ export default function BrowsePage() {
           )}
         </div>
 
-        <div style={{ flex: isDesktop ? 1 : 'none' }}>
-          <TextInput
-            label="Search recipes"
-            isLabelHidden
-            value={query}
-            onChange={setQuery}
-            placeholder="Search recipes…"
-          />
+        <div style={{ display: 'flex', gap: 'var(--spacing-2)', flex: isDesktop ? 1 : 'none' }}>
+          <div style={{ flex: 1 }}>
+            <TextInput
+              label="Search recipes"
+              isLabelHidden
+              value={query}
+              onChange={setQuery}
+              placeholder="Search recipes…"
+            />
+          </div>
+          <div style={{ width: 172, flexShrink: 0 }}>
+            <Selector
+              label="Sort"
+              isLabelHidden
+              size="sm"
+              value={sort}
+              onChange={setSort}
+              options={[
+                { value: 'updated', label: 'Recently updated' },
+                { value: 'newest', label: 'Newest' },
+                { value: 'title', label: 'A–Z' },
+              ]}
+            />
+          </div>
         </div>
 
-        {allTags.length > 0 && (
-          <div style={{ display: 'flex', gap: 'var(--spacing-2)', flexWrap: 'nowrap', overflowX: 'auto', paddingBottom: 'var(--spacing-1)' }}>
-            {allTags.map((tag) => (
-              <div key={tag} style={{ flexShrink: 0 }}>
-                <ToggleButton
-                  label={tag}
-                  size="sm"
-                  isPressed={activeTag === tag}
-                  onPressedChange={(pressed) => setActiveTag(pressed ? tag : '')}
-                />
-              </div>
-            ))}
+        <div style={{ display: 'flex', gap: 'var(--spacing-2)', flexWrap: 'nowrap', overflowX: 'auto', paddingBottom: 'var(--spacing-1)' }}>
+          <div style={{ flexShrink: 0 }}>
+            <ToggleButton
+              label="Drafts"
+              size="sm"
+              isPressed={draftsOnly}
+              onPressedChange={setDraftsOnly}
+            />
           </div>
-        )}
+          {allTags.map((tag) => (
+            <div key={tag} style={{ flexShrink: 0 }}>
+              <ToggleButton
+                label={tag}
+                size="sm"
+                isPressed={activeTag === tag}
+                onPressedChange={(pressed) => setActiveTag(pressed ? tag : '')}
+              />
+            </div>
+          ))}
+        </div>
 
         {isDesktop && (
           <DropdownMenu button={{ label: 'Add recipe', variant: 'primary' }} items={addMenuItems} menuWidth={200} />

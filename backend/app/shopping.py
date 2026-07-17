@@ -26,6 +26,12 @@ class ManualItemIn(BaseModel):
     unit: str | None = None
     # Set when the user picked an autocomplete suggestion (known category).
     category_id: int | None = None
+    note: str | None = None
+    # Optional: lets an undone item keep the recipe tag and checked state it
+    # had before it was removed (the recipe_id itself isn't validated here —
+    # a stale id just means the tag silently doesn't resolve to a title).
+    recipe_id: int | None = None
+    checked: bool = False
 
 
 class FromRecipeIn(BaseModel):
@@ -103,9 +109,10 @@ def add_manual_item(
     if miss:
         enqueue_categorise_job(db, [body.name])
     cur = db.execute(
-        "INSERT INTO shopping_items (name, amount, unit, category_id, added_by)"
-        " VALUES (?, ?, ?, ?, ?)",
-        (body.name.strip(), body.amount, body.unit or None, category_id, user["id"]),
+        "INSERT INTO shopping_items (name, amount, unit, note, category_id,"
+        " recipe_id, checked, added_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        (body.name.strip(), body.amount, body.unit or None, body.note,
+         category_id, body.recipe_id, int(body.checked), user["id"]),
     )
     db.commit()
     return _fetch_item(db, cur.lastrowid)
