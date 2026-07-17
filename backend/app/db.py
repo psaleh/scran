@@ -17,6 +17,27 @@ from . import config
 
 MIGRATIONS_DIR = Path(__file__).parent / "migrations"
 
+# The original 001-009 chain was squashed into a single 001_initial.sql at
+# v0.2.13. A database fully migrated before the squash already records
+# "001_initial.sql" and simply skips the baseline; one stuck partway through
+# the old chain can't be brought forward by the squashed file, so startup
+# refuses with instructions rather than running with a drifted schema.
+LEGACY_MIGRATIONS = {
+    "002_recipe_versions.sql",
+    "003_ingredient_note.sql",
+    "004_jobs_expand_types.sql",
+    "005_source_page_text.sql",
+    "006_ingredient_section.sql",
+    "007_job_recipe_link.sql",
+    "008_video_import.sql",
+    "009_shopping_lists.sql",
+}
+_UPGRADE_MSG = (
+    "This database was created before the migration squash and is only "
+    "partially migrated. Run Scran v0.2.13 (the last pre-squash release) "
+    "against it once to bring it up to date, then upgrade."
+)
+
 
 def connect() -> sqlite3.Connection:
     """Open a new connection with our standard pragmas applied.
@@ -66,6 +87,21 @@ def run_migrations() -> list[str]:
             row["filename"]
             for row in conn.execute("SELECT filename FROM schema_migrations")
         }
+        # Pre-squash databases (see LEGACY_MIGRATIONS above): fully migrated
+        # ones pass both checks and skip the baseline by filename; partially
+        # migrated ones must finish the old chain on v0.2.13 first.
+        legacy_done = done & LEGACY_MIGRATIONS
+        if legacy_done and legacy_done != LEGACY_MIGRATIONS:
+            raise RuntimeError(_UPGRADE_MSG)
+        if "001_initial.sql" in done and not legacy_done:
+            # Either a fresh post-squash install or an ancient DB that only
+            # ever applied the original 001 — told apart by a table the old
+            # chain added at its end (009).
+            has_lists = conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'shopping_lists'"
+            ).fetchone()
+            if not has_lists:
+                raise RuntimeError(_UPGRADE_MSG)
         for path in sorted(MIGRATIONS_DIR.glob("*.sql")):
             # Enforce the NNN_name.sql convention so ordering is explicit.
             if not re.match(r"^\d{3}_", path.name):

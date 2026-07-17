@@ -401,7 +401,10 @@ well-commented code (function components + hooks, no exotic patterns).
 
 - **Migrations**: numbered `backend/app/migrations/NNN_name.sql`, applied
   automatically at startup by `app/db.py`. Never edit an applied migration;
-  add a new file.
+  add a new file. The original 001–009 chain was squashed into one
+  `001_initial.sql` baseline after v0.2.13 (pre-squash DBs skip it by
+  filename; partially-migrated ones are refused at startup — see
+  `LEGACY_MIGRATIONS` in `db.py`). The next migration is `002_*.sql`.
 - **Auth**: isolated in `backend/app/auth/`. Nothing outside that package
   touches cookies, password hashes, or the trusted-proxy header. Endpoints
   take `user=Depends(get_current_user)` (or `get_current_admin`).
