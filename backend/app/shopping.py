@@ -32,6 +32,9 @@ class ManualItemIn(BaseModel):
     # a stale id just means the tag silently doesn't resolve to a title).
     recipe_id: int | None = None
     checked: bool = False
+    # Target list; omitted (or stale, e.g. undo after the list was deleted)
+    # falls back to the default list so items are never lost.
+    list_id: int | None = None
 
 
 class FromRecipeIn(BaseModel):
@@ -49,6 +52,13 @@ class ItemPatch(BaseModel):
     # Distinguish "recategorise to X" from "field not sent": the client sets
     # this flag when category_id is intentionally part of the patch.
     set_category: bool = False
+    # Move the item to another list. No set_* flag needed — moving to NULL is
+    # never meaningful, unlike category_id.
+    list_id: int | None = None
+
+
+class ShoppingListIn(BaseModel):
+    name: str = Field(min_length=1)
 
 
 class StoreIn(BaseModel):
@@ -58,7 +68,13 @@ class StoreIn(BaseModel):
 
 # --- Helpers -------------------------------------------------------------------
 
-def _item(row: sqlite3.Row) -> dict:
+def _default_list_id(db: sqlite3.Connection) -> int:
+    return db.execute(
+        "SELECT id FROM shopping_lists WHERE is_default = 1"
+    ).fetchone()["id"]
+
+
+def _item(row: sqlite3.Row, default_list_id: int) -> dict:
     return {
         "id": row["id"],
         "name": row["name"],
@@ -71,6 +87,9 @@ def _item(row: sqlite3.Row) -> dict:
         "recipe_title": row["recipe_title"],
         "checked": bool(row["checked"]),
         "created_at": row["created_at"],
+        # NULL means the default list (the column was added by ALTER TABLE, so
+        # NOT NULL wasn't possible — migration 009).
+        "list_id": row["list_id"] or default_list_id,
     }
 
 
@@ -83,7 +102,7 @@ def _fetch_item(db: sqlite3.Connection, item_id: int) -> dict:
     ).fetchone()
     if row is None:
         raise HTTPException(status_code=404, detail="Item not found")
-    return _item(row)
+    return _item(row, _default_list_id(db))
 
 
 # --- Shopping items --------------------------------------------------------------
@@ -95,7 +114,8 @@ def list_items(db: sqlite3.Connection = Depends(get_db), user=Depends(get_curren
         " FROM shopping_items LEFT JOIN recipes ON recipes.id = shopping_items.recipe_id"
         " ORDER BY shopping_items.id"
     ).fetchall()
-    return [_item(r) for r in rows]
+    default = _default_list_id(db)
+    return [_item(r, default) for r in rows]
 
 
 @router.post("/shopping", status_code=201)
@@ -108,11 +128,16 @@ def add_manual_item(
     category_id, miss = resolve_category(db, body.name, body.category_id)
     if miss:
         enqueue_categorise_job(db, [body.name])
+    list_id = _default_list_id(db)
+    if body.list_id is not None and db.execute(
+        "SELECT id FROM shopping_lists WHERE id = ?", (body.list_id,)
+    ).fetchone():
+        list_id = body.list_id
     cur = db.execute(
         "INSERT INTO shopping_items (name, amount, unit, note, category_id,"
-        " recipe_id, checked, added_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        " recipe_id, checked, added_by, list_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (body.name.strip(), body.amount, body.unit or None, body.note,
-         category_id, body.recipe_id, int(body.checked), user["id"]),
+         category_id, body.recipe_id, int(body.checked), user["id"], list_id),
     )
     db.commit()
     return _fetch_item(db, cur.lastrowid)
@@ -140,13 +165,16 @@ def add_from_recipe(
     if not ingredients:
         raise HTTPException(status_code=404, detail="No matching ingredients")
 
+    # Recipe sends always land on the default list; items can be moved to
+    # another list afterwards from the shopping list page.
+    list_id = _default_list_id(db)
     created = []
     for ing in ingredients:
         cur = db.execute(
             "INSERT INTO shopping_items (name, amount, unit, note, category_id,"
-            " recipe_id, added_by) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            " recipe_id, added_by, list_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             (ing["name"], ing["amount"], ing["unit"], ing["note"],
-             ing["category_id"], body.recipe_id, user["id"]),
+             ing["category_id"], body.recipe_id, user["id"], list_id),
         )
         created.append(cur.lastrowid)
     db.commit()
@@ -191,6 +219,16 @@ def patch_item(
             " unit = COALESCE(?, unit) WHERE id = ?",
             (body.amount, body.unit, item_id),
         )
+    if body.list_id is not None:
+        # Move (never copy) the item to another list.
+        if db.execute(
+            "SELECT id FROM shopping_lists WHERE id = ?", (body.list_id,)
+        ).fetchone() is None:
+            raise HTTPException(status_code=404, detail="List not found")
+        db.execute(
+            "UPDATE shopping_items SET list_id = ? WHERE id = ?",
+            (body.list_id, item_id),
+        )
     db.commit()
     return _fetch_item(db, item_id)
 
@@ -210,13 +248,119 @@ def delete_item(
 @router.post("/shopping/clear")
 def clear_items(
     checked_only: bool = True,
+    list_id: int | None = None,
     db: sqlite3.Connection = Depends(get_db),
     user=Depends(get_current_user),
 ):
-    if checked_only:
-        db.execute("DELETE FROM shopping_items WHERE checked = 1")
-    else:
-        db.execute("DELETE FROM shopping_items")
+    """Clear items — scoped to one list when list_id is given, else all."""
+    where = "checked = 1" if checked_only else "1 = 1"
+    params: list = []
+    if list_id is not None:
+        where += " AND COALESCE(list_id, ?) = ?"
+        params = [_default_list_id(db), list_id]
+    db.execute(f"DELETE FROM shopping_items WHERE {where}", params)
+    db.commit()
+    return {"ok": True}
+
+
+# --- Shopping lists (multiple named lists, migration 009) ------------------------
+
+@router.get("/shopping-lists")
+def list_shopping_lists(
+    db: sqlite3.Connection = Depends(get_db), user=Depends(get_current_user)
+):
+    default = _default_list_id(db)
+    counts = {
+        r["lid"]: (r["total"], r["unchecked"])
+        for r in db.execute(
+            "SELECT COALESCE(list_id, ?) AS lid, COUNT(*) AS total,"
+            " SUM(checked = 0) AS unchecked FROM shopping_items GROUP BY lid",
+            (default,),
+        )
+    }
+    rows = db.execute(
+        "SELECT * FROM shopping_lists ORDER BY is_default DESC, name"
+    ).fetchall()
+    return [
+        {
+            "id": r["id"],
+            "name": r["name"],
+            "is_default": bool(r["is_default"]),
+            "item_count": counts.get(r["id"], (0, 0))[0],
+            "unchecked_count": counts.get(r["id"], (0, 0))[1] or 0,
+        }
+        for r in rows
+    ]
+
+
+@router.post("/shopping-lists", status_code=201)
+def create_shopping_list(
+    body: ShoppingListIn,
+    db: sqlite3.Connection = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    try:
+        cur = db.execute(
+            "INSERT INTO shopping_lists (name) VALUES (?)", (body.name.strip(),)
+        )
+    except sqlite3.IntegrityError:
+        raise HTTPException(status_code=409, detail="A list with that name exists")
+    db.commit()
+    row = db.execute(
+        "SELECT * FROM shopping_lists WHERE id = ?", (cur.lastrowid,)
+    ).fetchone()
+    return {
+        "id": row["id"],
+        "name": row["name"],
+        "is_default": bool(row["is_default"]),
+        "item_count": 0,
+        "unchecked_count": 0,
+    }
+
+
+@router.patch("/shopping-lists/{list_id}")
+def rename_shopping_list(
+    list_id: int,
+    body: ShoppingListIn,
+    db: sqlite3.Connection = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    row = db.execute(
+        "SELECT * FROM shopping_lists WHERE id = ?", (list_id,)
+    ).fetchone()
+    if row is None:
+        raise HTTPException(status_code=404, detail="List not found")
+    try:
+        db.execute(
+            "UPDATE shopping_lists SET name = ? WHERE id = ?",
+            (body.name.strip(), list_id),
+        )
+    except sqlite3.IntegrityError:
+        raise HTTPException(status_code=409, detail="A list with that name exists")
+    db.commit()
+    return {"ok": True}
+
+
+@router.delete("/shopping-lists/{list_id}")
+def delete_shopping_list(
+    list_id: int,
+    db: sqlite3.Connection = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    row = db.execute(
+        "SELECT * FROM shopping_lists WHERE id = ?", (list_id,)
+    ).fetchone()
+    if row is None:
+        raise HTTPException(status_code=404, detail="List not found")
+    if row["is_default"]:
+        raise HTTPException(status_code=400, detail="The default list can't be deleted")
+    # Items are moved to the default list, never lost (settled behaviour).
+    default = _default_list_id(db)
+    db.execute(
+        "UPDATE shopping_items SET list_id = ? WHERE COALESCE(list_id, ?) = ?",
+        (default, default, list_id),
+    )
+    db.execute("DELETE FROM shopping_lists WHERE id = ?", (list_id,))
     db.commit()
     return {"ok": True}
 

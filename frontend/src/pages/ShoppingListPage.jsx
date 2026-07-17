@@ -9,6 +9,7 @@ import { EmptyState } from '@astryxdesign/core/EmptyState'
 import { IconButton } from '@astryxdesign/core/IconButton'
 import { Selector } from '@astryxdesign/core/Selector'
 import { Spinner } from '@astryxdesign/core/Spinner'
+import { TabList, Tab } from '@astryxdesign/core/TabList'
 import { TextInput } from '@astryxdesign/core/TextInput'
 
 import { api } from '../api.js'
@@ -24,8 +25,11 @@ const SWIPE_THRESHOLD = 140
  * One list row. Interactions (from the design mockup):
  * - swipe right = toggle checked, swipe left = remove
  * - plain tap does nothing, so an accidental brush doesn't check an item
+ * - with multiple lists, a grip handle starts an HTML5 drag towards a list
+ *   tab (the handle is separate from the row so the pointer-swipe gesture
+ *   is untouched; touch users move items via the ⊞ dialog instead)
  */
-function ItemRow({ item, onToggle, onRemove, onRecategorise }) {
+function ItemRow({ item, onToggle, onRemove, onRecategorise, canDrag, onDragStartItem, onDragEndItem, isDragSource }) {
   const [dx, setDx] = useState(0)
   const dragRef = useRef(null)
 
@@ -96,6 +100,7 @@ function ItemRow({ item, onToggle, onRemove, onRecategorise }) {
           userSelect: 'none',
           transform: `translateX(${dx}px)`,
           transition: dragRef.current?.active ? 'none' : 'transform 200ms cubic-bezier(0.24,1,0.4,1)',
+          opacity: isDragSource ? 0.4 : 1,
         }}
       >
         {meta && (
@@ -123,9 +128,37 @@ function ItemRow({ item, onToggle, onRemove, onRecategorise }) {
             </div>
           )}
         </div>
-        {/* Item actions (recategorise, spec §3.6.4, plus mark done/remove —
-            the only non-swipe path for those). Stop pointer events so the
-            tap doesn't also toggle the item or start a swipe. */}
+        {/* Drag handle towards a list tab (only shown with multiple lists).
+            Same stop-propagation trick as the actions button so grabbing the
+            grip never starts a swipe. */}
+        {canDrag && (
+          <div
+            onPointerDown={(e) => e.stopPropagation()}
+            onPointerUp={(e) => e.stopPropagation()}
+            draggable
+            onDragStart={(e) => {
+              e.dataTransfer.effectAllowed = 'move'
+              e.dataTransfer.setData('text/plain', String(item.id))
+              onDragStartItem(item)
+            }}
+            onDragEnd={() => onDragEndItem()}
+            aria-hidden="true"
+            style={{
+              flexShrink: 0,
+              cursor: 'grab',
+              color: 'var(--color-text-secondary)',
+              padding: '0 var(--spacing-1)',
+              fontSize: 'var(--font-size-lg)',
+              touchAction: 'none',
+            }}
+          >
+            ⠿
+          </div>
+        )}
+        {/* Item actions (recategorise, spec §3.6.4, plus mark done/remove and
+            move-to-list — the only non-swipe/non-drag path for those). Stop
+            pointer events so the tap doesn't also toggle the item or start a
+            swipe. */}
         <div
           onPointerDown={(e) => e.stopPropagation()}
           onPointerUp={(e) => e.stopPropagation()}
@@ -144,7 +177,7 @@ function ItemRow({ item, onToggle, onRemove, onRecategorise }) {
   )
 }
 
-function CategorySection({ label, items, onToggle, onRemove, onRecategorise }) {
+function CategorySection({ label, items, onToggle, onRemove, onRecategorise, dragProps }) {
   return (
     <div>
       <div style={{ ...sectionLabelStyle, padding: 'var(--spacing-3) var(--spacing-4) var(--spacing-1)' }}>
@@ -154,7 +187,16 @@ function CategorySection({ label, items, onToggle, onRemove, onRecategorise }) {
         {items.map((item, i) => (
           <div key={item.id}>
             {i > 0 && <Divider />}
-            <ItemRow item={item} onToggle={onToggle} onRemove={onRemove} onRecategorise={onRecategorise} />
+            <ItemRow
+              item={item}
+              onToggle={onToggle}
+              onRemove={onRemove}
+              onRecategorise={onRecategorise}
+              canDrag={dragProps.canDrag}
+              onDragStartItem={dragProps.onDragStartItem}
+              onDragEndItem={dragProps.onDragEndItem}
+              isDragSource={dragProps.draggingItem?.id === item.id}
+            />
           </div>
         ))}
       </Card>
@@ -163,13 +205,21 @@ function CategorySection({ label, items, onToggle, onRemove, onRecategorise }) {
 }
 
 /** Shopping list (spec §3.4, §6.6): store-ordered category groups, recipe
- * tags, adjacent duplicate grouping, check-off, manual add w/ autocomplete. */
+ * tags, adjacent duplicate grouping, check-off, manual add w/ autocomplete.
+ * Multiple named lists appear as tabs; items move between them via drag or
+ * the ⊞ dialog. All items are fetched once and filtered client-side so tab
+ * switching, per-tab counts and cross-list undo need no extra requests. */
 export default function ShoppingListPage() {
   const [items, setItems] = useState(null)
   const [listError, setListError] = useState(null)
   const [categories, setCategories] = useState([])
   const [stores, setStores] = useState([])
   const [storeId, setStoreId] = useState(() => localStorage.getItem('scran.store') || '')
+  const [lists, setLists] = useState([])
+  const [activeListId, setActiveListId] = useState(null)
+  // Item currently being dragged towards a tab / the tab hovered over.
+  const [draggingItem, setDraggingItem] = useState(null)
+  const [dragOverList, setDragOverList] = useState(null)
   const toast = useToast()
 
   // Clear-all/Clear-completed confirmation: null = closed, else which kind.
@@ -195,6 +245,16 @@ export default function ShoppingListPage() {
         setListError(err.message || 'Failed to load the shopping list.')
         setItems([])
       })
+    api('/api/shopping-lists')
+      .then((loaded) => {
+        setLists(loaded)
+        // Restore the last-viewed tab; fall back to the default list when the
+        // stored id is stale (list deleted since).
+        const stored = Number(localStorage.getItem('scran.shoppingList'))
+        const valid = loaded.find((l) => l.id === stored)
+        setActiveListId(valid ? valid.id : loaded.find((l) => l.is_default)?.id ?? null)
+      })
+      .catch(() => {})
     api('/api/categories').then(setCategories).catch(() => {})
     api('/api/stores').then(setStores).catch(() => {})
   }, [])
@@ -219,6 +279,11 @@ export default function ShoppingListPage() {
     else localStorage.removeItem('scran.store')
   }
 
+  const selectList = (listId) => {
+    setActiveListId(listId)
+    localStorage.setItem('scran.shoppingList', String(listId))
+  }
+
   const addItem = async () => {
     const name = draft.trim()
     if (!name) return
@@ -230,6 +295,7 @@ export default function ShoppingListPage() {
           amount: draftAmount === '' ? null : Number(draftAmount) || null,
           unit: draftUnit.trim() || null,
           category_id: draftCategory,
+          list_id: activeListId,
         },
       })
       setItems((list) => [...list, created])
@@ -283,6 +349,9 @@ export default function ShoppingListPage() {
               category_id: item.category_id,
               recipe_id: item.recipe_id,
               checked: item.checked,
+              // Restore to the item's original list (the server falls back to
+              // the default list if that list has since been deleted).
+              list_id: item.list_id,
             },
           }),
         ),
@@ -305,6 +374,22 @@ export default function ShoppingListPage() {
     }
   }
 
+  // Move (never copy) an item to another list — from a drag onto a tab or
+  // the ⊞ dialog picker. Optimistic, rolled back on failure.
+  const moveItem = async (item, listId) => {
+    if (item.list_id === listId) return
+    const previous = items
+    setItems((list) => list.map((i) => (i.id === item.id ? { ...i, list_id: listId } : i)))
+    try {
+      await api(`/api/shopping/${item.id}`, { method: 'PATCH', body: { list_id: listId } })
+      const target = lists.find((l) => l.id === listId)
+      toast.success(`Moved ${item.name} to ${target ? target.name : 'list'}`)
+    } catch (err) {
+      setItems(previous)
+      toast.error(err.message)
+    }
+  }
+
   const recategorise = async (item, categoryId) => {
     setRecatItem(null)
     try {
@@ -321,12 +406,14 @@ export default function ShoppingListPage() {
   }
 
   const clear = async (checkedOnly) => {
+    // Scoped to the active list only — other tabs keep their items.
     const previous = items
-    const removed = checkedOnly ? previous.filter((i) => i.checked) : previous
+    const inList = previous.filter((i) => i.list_id === activeListId)
+    const removed = checkedOnly ? inList.filter((i) => i.checked) : inList
     setClearBusy(true)
     try {
-      await api(`/api/shopping/clear?checked_only=${checkedOnly}`, { method: 'POST' })
-      setItems((list) => (checkedOnly ? list.filter((i) => !i.checked) : []))
+      await api(`/api/shopping/clear?checked_only=${checkedOnly}&list_id=${activeListId}`, { method: 'POST' })
+      setItems((list) => list.filter((i) => i.list_id !== activeListId || (checkedOnly && !i.checked)))
       toast.success(`Cleared ${removed.length} item${removed.length === 1 ? '' : 's'}`, {
         action: { label: 'Undo', onClick: () => restoreItems(removed) },
       })
@@ -347,13 +434,18 @@ export default function ShoppingListPage() {
     )
   }
 
+  // Only the active tab's items are shown; everything below groups `visible`.
+  const visible = activeListId === null ? items : items.filter((i) => i.list_id === activeListId)
+  const uncheckedCountFor = (listId) => items.filter((i) => i.list_id === listId && !i.checked).length
+  const showTabs = lists.length > 1
+
   // --- Grouping: category sections in the selected store's walking route ----
   const categoryName = Object.fromEntries(categories.map((c) => [c.id, c.name]))
   const store = stores.find((s) => String(s.id) === String(storeId))
   const routeOrder = store ? store.category_order : categories.map((c) => c.id)
 
-  const active = items.filter((i) => !i.checked)
-  const completed = items.filter((i) => i.checked)
+  const active = visible.filter((i) => !i.checked)
+  const completed = visible.filter((i) => i.checked)
 
   // Same-name items sort adjacently inside their category (spec: never
   // auto-merge, group visually instead).
@@ -372,6 +464,14 @@ export default function ShoppingListPage() {
 
   const checkedCount = completed.length
 
+  // Shared drag wiring for every CategorySection/ItemRow.
+  const dragProps = {
+    canDrag: showTabs,
+    draggingItem,
+    onDragStartItem: setDraggingItem,
+    onDragEndItem: () => { setDraggingItem(null); setDragOverList(null) },
+  }
+
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, width: '100%', maxWidth: 600, margin: '0 auto' }}>
@@ -381,6 +481,30 @@ export default function ShoppingListPage() {
             <h1 style={{ margin: 0, fontSize: 'var(--text-heading-1-size)', fontWeight: 'var(--text-heading-1-weight)', color: 'var(--color-text-primary)' }}>
               Shopping list
             </h1>
+            {/* List tabs (hidden with a single list). Each tab is also a drop
+                target: dragging an item's ⠿ handle onto a tab moves it there. */}
+            {showTabs && (
+              <div style={{ overflowX: 'auto' }}>
+                <TabList value={String(activeListId)} onChange={(v) => selectList(Number(v))}>
+                  {lists.map((l) => (
+                    <Tab
+                      key={l.id}
+                      value={String(l.id)}
+                      label={uncheckedCountFor(l.id) > 0 ? `${l.name} (${uncheckedCountFor(l.id)})` : l.name}
+                      onDragEnter={(e) => { if (draggingItem) { e.preventDefault(); setDragOverList(l.id) } }}
+                      onDragOver={(e) => { if (draggingItem) e.preventDefault() }}
+                      onDragLeave={() => { if (dragOverList === l.id) setDragOverList(null) }}
+                      onDrop={(e) => {
+                        e.preventDefault()
+                        if (draggingItem) moveItem(draggingItem, l.id)
+                        setDragOverList(null)
+                      }}
+                      style={dragOverList === l.id ? { outline: '2px solid var(--color-accent)', borderRadius: 'var(--radius-sm)' } : undefined}
+                    />
+                  ))}
+                </TabList>
+              </div>
+            )}
             {stores.length > 0 && (
               <Selector
                 label="Store"
@@ -439,23 +563,23 @@ export default function ShoppingListPage() {
             <div style={{ padding: 'var(--spacing-4)' }}>
               <Banner status="error" title="Couldn't load your shopping list" description={listError} />
             </div>
-          ) : items.length === 0 ? (
+          ) : visible.length === 0 ? (
             <div style={{ padding: 'var(--spacing-8) var(--spacing-4)' }}>
               <EmptyState
-                title="List is empty"
+                title={showTabs ? 'This list is empty' : 'List is empty'}
                 description="Add items above, or send ingredients over from a recipe."
               />
             </div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-4)', paddingTop: 'var(--spacing-1)' }}>
               {orderedSections.map((id) => (
-                <CategorySection key={id} label={categoryName[id]} items={byCategory.get(id)} onToggle={toggleItem} onRemove={removeItem} onRecategorise={setRecatItem} />
+                <CategorySection key={id} label={categoryName[id]} items={byCategory.get(id)} onToggle={toggleItem} onRemove={removeItem} onRecategorise={setRecatItem} dragProps={dragProps} />
               ))}
               {uncategorised.length > 0 && (
-                <CategorySection label="Uncategorised" items={uncategorised} onToggle={toggleItem} onRemove={removeItem} onRecategorise={setRecatItem} />
+                <CategorySection label="Uncategorised" items={uncategorised} onToggle={toggleItem} onRemove={removeItem} onRecategorise={setRecatItem} dragProps={dragProps} />
               )}
               {completed.length > 0 && (
-                <CategorySection label="Completed" items={[...completed].sort(byName)} onToggle={toggleItem} onRemove={removeItem} onRecategorise={setRecatItem} />
+                <CategorySection label="Completed" items={[...completed].sort(byName)} onToggle={toggleItem} onRemove={removeItem} onRecategorise={setRecatItem} dragProps={dragProps} />
               )}
             </div>
           )}
@@ -486,6 +610,24 @@ export default function ShoppingListPage() {
                   />
                 </div>
               </div>
+              {/* Touch/assistive path for moving between lists (drag-to-tab
+                  needs a mouse). Only shown when there is somewhere to move to. */}
+              {showTabs && (
+                <>
+                  <Divider />
+                  <span style={{ fontSize: 'var(--text-supporting-size)', color: 'var(--color-text-secondary)' }}>Move to list</span>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-1)' }}>
+                    {lists.filter((l) => l.id !== recatItem.list_id).map((l) => (
+                      <Button
+                        key={l.id}
+                        label={l.name}
+                        variant="ghost"
+                        clickAction={() => { moveItem(recatItem, l.id); setRecatItem(null) }}
+                      />
+                    ))}
+                  </div>
+                </>
+              )}
               <Divider />
               <span style={{ fontSize: 'var(--text-supporting-size)', color: 'var(--color-text-secondary)' }}>Category</span>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-1)', maxHeight: '50vh', overflowY: 'auto' }}>
@@ -503,8 +645,8 @@ export default function ShoppingListPage() {
           )}
         </Dialog>
 
-        {/* Footer actions */}
-        {items.length > 0 && (
+        {/* Footer actions (scoped to the active list) */}
+        {visible.length > 0 && (
           <div style={{ display: 'flex', gap: 'var(--spacing-2)', padding: 'var(--spacing-3) var(--spacing-4)', background: 'var(--color-background-surface)', borderTop: '1px solid var(--color-border)', flexShrink: 0 }}>
             <div style={{ flex: 1 }}>
               <Button
@@ -526,8 +668,8 @@ export default function ShoppingListPage() {
           title={clearConfirm === 'all' ? 'Clear entire list?' : 'Clear completed items?'}
           message={
             clearConfirm === 'all'
-              ? 'This removes every item on the shopping list.'
-              : 'This removes all checked-off items from the list.'
+              ? 'This removes every item on this list.'
+              : 'This removes all checked-off items from this list.'
           }
           confirmLabel={clearConfirm === 'all' ? 'Clear all' : 'Clear completed'}
           isBusy={clearBusy}

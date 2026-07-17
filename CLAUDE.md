@@ -71,6 +71,28 @@ service worker.
 - **Production Docker Compose**: `docker-compose.prod.yml` at repo root
   (separate from the dev `docker-compose.yml`) for deploying the built
   image with the two persistent volumes.
+- **Multiple shopping lists** (2026-07-17, migration 009): `shopping_lists`
+  table (one `is_default` row, enforced by a partial unique index) +
+  nullable `shopping_items.list_id` — **NULL is always read as the default
+  list** (ALTER TABLE can't add NOT NULL), hence the `COALESCE`/`or default`
+  handling in `shopping.py`. CRUD under `/api/shopping-lists` (409 on dupe
+  name, 400 deleting the default; deleting a list moves its items to the
+  default — never lost). Recipe sends (`from-recipe`) always land on the
+  default list; `POST /api/shopping` and `PATCH /api/shopping/{id}` take an
+  optional `list_id` (POST falls back to default on a stale id so undo
+  survives list deletion; PATCH moves — never copies — the item);
+  `/api/shopping/clear` takes an optional `?list_id=` scope.
+  `ShoppingListPage.jsx`: lists render as `TabList` tabs (hidden when only
+  one list exists) with unchecked counts; all items are fetched once and
+  filtered client-side by `activeListId` (persisted in
+  `localStorage['scran.shoppingList']`). Items move via an HTML5-drag ⠿
+  handle onto a tab (handle is separate from the row so the pointer-swipe
+  gesture is untouched; each Astryx `Tab` takes the drop handlers directly —
+  it spreads rest props onto its button) or via a "Move to list" picker in
+  the ⊞ row dialog (the touch/assistive path). Manual add and clear are
+  scoped to the active tab; undo restores to the item's original list.
+  Lists are managed in Settings → Shopping lists (`ShoppingListsSection`,
+  clone of CategoriesSection; default shows a Badge, no delete button).
 
 ## Post-launch fixes (GitHub issues, 2026-07-13)
 
@@ -262,8 +284,13 @@ Authelia/Authentik can be adopted later without a rewrite.
   AI photo import (multi-photo = one job, lands in the import inbox); AI
   YouTube video import (see above); cross-instance JSON import/export (see
   above).
-- **Shopping list**: one shared list. Sources: per-ingredient "add to list"
-  + "add all" from a recipe, or manual add with autocomplete. Items are
+- **Shopping list**: shared household lists — one default list plus any
+  number of extra named lists (tabs on the shopping list page; managed in
+  Settings). Sources: per-ingredient "add to list"
+  + "add all" from a recipe (always onto the default list), or manual add
+  with autocomplete (onto the active tab). Items move between lists (drag a
+  row's handle onto a tab, or the row dialog) — always moved, never copied.
+  Items are
   **copies, not links** — sending an ingredient copies name/amount/unit/
   category and records the originating `recipe_id` as a tag; editing the
   recipe later never touches the list and vice versa. Duplicates are never
@@ -328,10 +355,10 @@ add-to-list, steps, cooking notes, Edit/Publish/Export) · Recipe editor
 (manual entry + all draft review flows: dynamic ingredient rows with
 autocomplete, reorderable steps, photo upload, publish/save-draft) · Import
 inbox (queued/processing/failed jobs + drafts awaiting review, AI endpoint
-status indicator) · Shopping list (store selector, category-grouped
-store-ordered items, recipe tags, adjacent duplicate grouping, manual add,
-clear-checked) · Settings (AI profiles, stores route editor, categories,
-users (admin-only), auth options).
+status indicator) · Shopping list (list tabs with drag-to-move, store selector,
+category-grouped store-ordered items, recipe tags, adjacent duplicate
+grouping, manual add, clear-checked) · Settings (AI profiles, stores route
+editor, categories, shopping lists, users (admin-only), auth options).
 
 ### Settled decisions (do not relitigate)
 - Shopping list items are copies with a recipe tag, not live links.

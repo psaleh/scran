@@ -437,6 +437,107 @@ function CategoriesSection() {
   )
 }
 
+// --- Shopping lists ----------------------------------------------------------------
+
+function ShoppingListsSection() {
+  const [lists, setLists] = useState(null) // null = loading
+  const [newName, setNewName] = useState('')
+  const [renamingId, setRenamingId] = useState(null)
+  const [renameText, setRenameText] = useState('')
+  const [error, setError] = useState('')
+  const [deleteTarget, setDeleteTarget] = useState(null) // list being deleted
+
+  const load = () => api('/api/shopping-lists').then(setLists).catch((e) => { setError(e.message); setLists([]) })
+  useEffect(() => { load() }, [])
+
+  const run = async (fn) => {
+    setError('')
+    try {
+      await fn()
+      load()
+    } catch (e) {
+      setError(e.message)
+    }
+  }
+
+  const add = () => run(async () => {
+    if (!newName.trim()) return
+    await api('/api/shopping-lists', { method: 'POST', body: { name: newName.trim() } })
+    setNewName('')
+  })
+  const rename = () => run(async () => {
+    await api(`/api/shopping-lists/${renamingId}`, { method: 'PATCH', body: { name: renameText.trim() } })
+    setRenamingId(null)
+  })
+  const remove = () => run(async () => {
+    await api(`/api/shopping-lists/${deleteTarget.id}`, { method: 'DELETE' })
+    setDeleteTarget(null)
+  })
+
+  if (lists === null) {
+    return (
+      <div style={sectionSpinnerStyle}>
+        <Spinner label="Loading shopping lists" />
+      </div>
+    )
+  }
+
+  const defaultList = lists.find((l) => l.is_default)
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-3)' }}>
+      {error && <Banner status="error" title={error} />}
+      <span style={hintStyle}>
+        Extra shopping lists show as tabs on the shopping list page. Items sent
+        from recipes always land on the default list; deleting a list moves its
+        items back there.
+      </span>
+      <Card padding={0}>
+        {lists.map((l, i) => (
+          <div key={l.id}>
+            {i > 0 && <Divider />}
+            <div style={rowStyle}>
+              {renamingId === l.id ? (
+                <>
+                  <div style={{ flex: 1 }} onKeyDown={(e) => { if (e.key === 'Enter') rename() }}>
+                    <TextInput label="Rename list" isLabelHidden value={renameText} onChange={setRenameText} hasAutoFocus />
+                  </div>
+                  <Button label="Save" size="sm" variant="primary" clickAction={rename} />
+                  <Button label="Cancel" size="sm" variant="ghost" onClick={() => setRenamingId(null)} />
+                </>
+              ) : (
+                <>
+                  <span style={rowTextStyle}>{l.name}</span>
+                  {l.is_default && <Badge label="Default" />}
+                  <IconButton label={`Rename ${l.name}`} icon={<span>✎</span>} variant="ghost" size="sm" onClick={() => { setRenamingId(l.id); setRenameText(l.name) }} />
+                  {!l.is_default && (
+                    <IconButton label={`Delete ${l.name}`} icon={<span>×</span>} variant="ghost" size="sm" onClick={() => setDeleteTarget(l)} />
+                  )}
+                </>
+              )}
+            </div>
+          </div>
+        ))}
+      </Card>
+      <div style={{ display: 'flex', gap: 'var(--spacing-2)', maxWidth: 420 }} onKeyDown={(e) => { if (e.key === 'Enter') add() }}>
+        <div style={{ flex: 1 }}>
+          <TextInput label="New list" isLabelHidden value={newName} onChange={setNewName} placeholder="Add a list…" />
+        </div>
+        <Button label="Add" variant="secondary" clickAction={add} isDisabled={!newName.trim()} />
+      </div>
+
+      <ConfirmDialog
+        isOpen={deleteTarget !== null}
+        onOpenChange={(open) => { if (!open) setDeleteTarget(null) }}
+        title="Delete this list?"
+        message={deleteTarget ? `Items on "${deleteTarget.name}" move to "${defaultList?.name ?? 'the default list'}". The list itself can't be recovered.` : ''}
+        confirmLabel="Delete list"
+        onConfirm={remove}
+      />
+    </div>
+  )
+}
+
 // --- Users (admin only) ------------------------------------------------------------
 
 function UsersSection({ currentUser }) {
@@ -599,7 +700,7 @@ function AuthSection() {
 
 // --- Page ------------------------------------------------------------------------
 
-/** Settings (spec §6.7): AI profiles, stores, categories, users, auth. */
+/** Settings (spec §6.7): AI profiles, stores, categories, shopping lists, users, auth. */
 export default function SettingsPage({ currentUser }) {
   const isDesktop = useIsDesktop()
   const [tab, setTab] = useState('ai')
@@ -608,6 +709,7 @@ export default function SettingsPage({ currentUser }) {
     { value: 'ai', label: 'AI profiles', render: () => <AiProfilesSection /> },
     { value: 'stores', label: 'Stores', render: () => <StoresSection /> },
     { value: 'categories', label: 'Categories', render: () => <CategoriesSection /> },
+    { value: 'lists', label: 'Shopping lists', render: () => <ShoppingListsSection /> },
     ...(currentUser.is_admin
       ? [
           { value: 'users', label: 'Users', render: () => <UsersSection currentUser={currentUser} /> },
