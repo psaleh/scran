@@ -18,7 +18,7 @@ scraping — see below), and cross-instance recipe import/export (JSON
 paste-or-file, see below). AI slice stages 1–3.5 are done and owner-tested:
 shared AI client (`backend/app/ai.py`), profile test-connection, job queue
 worker (`backend/app/worker.py`), jobs API (`backend/app/jobs.py`), the
-import inbox screen (`frontend/src/pages/InboxPage.jsx`), the categorise job
+import inbox screen (`frontend/src/pages/InboxSection.jsx`), the categorise job
 handler, manual recategorisation UI (shopping-list row dialog + editor
 per-row selector), and url_redraft (AI-extraction fallback, "Tidy up with
 AI" — available on the very first import review, before any manual save).
@@ -66,8 +66,8 @@ service worker.
 - **Admin-only recipe delete**: `DELETE /api/recipes/{id}` now depends on
   `get_current_admin`, not `get_current_user` — matches the Users/Settings
   admin gating already in place.
-- **Logout**: `AppNav.jsx` takes an `onLogout` prop and renders a logout
-  control (icon button on desktop nav, bottom-nav item on mobile).
+- **Logout**: lives on the Settings page header (confirm dialog before
+  calling the API), not in the nav — see the 2026-07-17 UI pass below.
 - **Production Docker Compose**: `docker-compose.prod.yml` at repo root
   (separate from the dev `docker-compose.yml`) for deploying the built
   image with the two persistent volumes.
@@ -93,6 +93,45 @@ service worker.
   scoped to the active tab; undo restores to the item's original list.
   Lists are managed in Settings → Shopping lists (`ShoppingListsSection`,
   clone of CategoriesSection; default shows a Badge, no delete button).
+
+## UI pass (2026-07-17, commit 6447408) + migration squash
+
+- **Nav** (`AppNav.jsx`): four items — Recipes, Shopping, Temps, Settings —
+  each with a lucide-react icon rendered through Astryx `Icon`
+  (lucide-react is a direct dependency). Desktop links are absolutely
+  centred in the top bar; mobile icons replace the old dot indicator. Page
+  `<h1>` titles were removed from all five screens (the nav is the location
+  signal); the recipe detail title stays (it's content).
+- **Import inbox is a Settings section**: `InboxPage.jsx` →
+  `InboxSection.jsx`, rendered as the first (default) tab of
+  `SettingsPage.jsx`. `/inbox` redirects to `/settings?tab=inbox`
+  (`?tab=` deep-links any section) and the import dialogs navigate there.
+  Settings tabs use `TabMenu`: four inline (Import inbox, AI profiles,
+  Stores, Categories) + a "More" dropdown (Shopping lists, Appearance,
+  admin-only Users/Auth) — tabs must never scroll out of sight (tab-bar
+  scrollbars are hidden app-wide via `.hide-scrollbar` in
+  `frontend/src/app.css`, the only global stylesheet).
+- **Logout**: button beside the Settings tabs, wrapped in `ConfirmDialog`;
+  `App.jsx` passes `onLogout` to the Settings route, not to `AppNav`.
+- **Browse power search** (`BrowsePage.jsx`): the tag chips row and Drafts
+  toggle are gone. One custom search bar (`.search-bar`, styled with
+  tokens to match Astryx md controls at 40px) holds free FTS text plus
+  filter chips: typing `tag:x `, `tag:"Two Words"` (closing quote or
+  space/Enter completes) or `is:draft`/`is:published` turns the token into
+  a removable Astryx `Token` chip; Backspace on empty input pops the last
+  chip; `SuggestionDropdown` autocompletes tag names after `tag:` and
+  shows syntax hints on an empty box. One chip per key (API takes a single
+  tag/status). Card tag badges (`TagBadge` with optional `onClick`) set
+  the tag chip. Watch `COMPLETE_TOKEN_RE`: a bare value must not start
+  with `"` or a space inside an open quote chipifies early.
+- **Appearance / dark mode**: Settings → Appearance has a
+  System/Light/Dark `SegmentedControl`. Mode state lives in `main.jsx`
+  (`Root`), persisted in `localStorage['scran.themeMode']`, exposed via
+  `ThemeModeContext` (`frontend/src/themeMode.js`), and passed as the
+  Astryx `Theme` `mode` prop — matcha ships `light-dark()` tokens, so
+  this is NOT a theme swap (theme stays matcha per settled decisions).
+- **Migration squash** (commit b9afbb6): the 001–009 chain became one
+  `001_initial.sql` baseline — see Conventions.
 
 ## Post-launch fixes (GitHub issues, 2026-07-13)
 
@@ -137,7 +176,7 @@ follow-on mechanics future agents should know about:
   enqueue time for a redraft-of-an-existing-recipe, or via
   `RecipeIn.review_job_id` when a fallback-extraction draft (no recipe yet)
   gets saved for the first time. `GET /api/jobs` left-joins `recipes.status`
-  as `recipe_status`; `InboxPage.jsx`'s `needsReview` is now
+  as `recipe_status`; `InboxSection.jsx`'s `needsReview` is now
   `status === 'done' && REVIEW_TYPES.has(type) && recipe_status !== 'published'`.
   `review()` prefers `job.recipe_id` over `job.result.recipe_id` so
   re-clicking "Review draft" after an earlier draft save reopens that
@@ -152,7 +191,7 @@ follow-on mechanics future agents should know about:
   stages 3 (categorise) and 3.5 (url_redraft) are done and owner-tested;
   stage 4 (photo import) is built, awaiting owner testing with real
   cookbook photos. Next is 5 (cleanup job + remove the temporary "Enqueue
-  test job" button in `InboxPage.jsx` and `POST /api/jobs/test` in
+  test job" button in `InboxSection.jsx` and `POST /api/jobs/test` in
   `jobs.py`).
 - Stage 4 shape: `POST /api/import/photos` (`importer.py`) stores 1–8
   uploaded photos under `uploads/import/` and queues ONE `photo_import` job
@@ -181,7 +220,7 @@ follow-on mechanics future agents should know about:
   photo(s)", always `draft`). `_run_job` copies `result["recipe_id"]` into
   `jobs.recipe_id` on success, so re-clicking "Review draft" reopens the
   same recipe. Review = the normal editor with router state
-  `{reviewPhotos: [paths]}` from `InboxPage.jsx`: originals in a sticky
+  `{reviewPhotos: [paths]}` from `InboxSection.jsx`: originals in a sticky
   left column on desktop / stacked above the form on mobile, plus a
   check-quantities warning Banner. Import photos are never deleted and are
   not the recipe's cover photo (user uploads one in the editor if wanted).
@@ -218,13 +257,13 @@ follow-on mechanics future agents should know about:
   fixes" above. `GET /api/jobs` returns a per-type `summary` string, not raw
   payloads — extend `_job()` in `jobs.py` when adding a type. UI maps DB
   statuses pending/running/done/failed to Queued/Processing/Done/Failed in
-  `InboxPage.jsx` (`STATUS_META`); a `REVIEW_TYPES` job (photo_import,
+  `InboxSection.jsx` (`STATUS_META`); a `REVIEW_TYPES` job (photo_import,
   url_redraft) 'done' displays as "needs review" until its linked recipe is
   published.
 - Astryx gotcha: `StatusDot` takes `variant` (success|error|…) + required
   `label`, not `status`. Design mockups live in the Claude Design project
   (DesignSync tool), not on disk — `ui_kits/recipe-app/import-inbox.html`
-  was the template for InboxPage.
+  was the template for the inbox (now `InboxSection.jsx`).
 - Stage 3 (owner-tested): `_categorise_job` in `worker.py` asks the model
   for a name→category JSON mapping (`_extract_json` strips fences), falls
   back to "other" for unknown categories, and writes back to
@@ -348,17 +387,20 @@ configured AI endpoint — no telemetry, no other external calls.
 
 ### Screens
 Mobile-first; desktop is an enhancement. Primary venues: kitchen (recipe
-view) and supermarket (shopping list). Login (minimal) · Recipe browse/home
-(card grid, search, tag filter chips, add menu: manual/URL/photo/video/
-import-data) · Recipe detail (photo, servings stepper, ingredients with
-add-to-list, steps, cooking notes, Edit/Publish/Export) · Recipe editor
+view) and supermarket (shopping list). No per-page titles — the icon nav
+(Recipes/Shopping/Temps/Settings) is the location signal. Login (minimal) ·
+Recipe browse/home (card grid, power search bar with removable `tag:` /
+`is:draft` filter chips + free FTS text, sort, add menu: manual/URL/photo/
+video/import-data) · Recipe detail (photo, servings stepper, ingredients
+with add-to-list, steps, cooking notes, Edit/Publish/Export) · Recipe editor
 (manual entry + all draft review flows: dynamic ingredient rows with
-autocomplete, reorderable steps, photo upload, publish/save-draft) · Import
-inbox (queued/processing/failed jobs + drafts awaiting review, AI endpoint
-status indicator) · Shopping list (list tabs with drag-to-move, store selector,
+autocomplete, reorderable steps, photo upload, publish/save-draft) ·
+Shopping list (list tabs with drag-to-move, store selector,
 category-grouped store-ordered items, recipe tags, adjacent duplicate
-grouping, manual add, clear-checked) · Settings (AI profiles, stores route
-editor, categories, shopping lists, users (admin-only), auth options).
+grouping, manual add, clear-checked) · Settings (Import inbox — queued/
+processing/failed jobs + drafts awaiting review + AI endpoint status —
+AI profiles, stores route editor, categories, shopping lists, appearance
+(colour mode), users (admin-only), auth options, logout).
 
 ### Settled decisions (do not relitigate)
 - Shopping list items are copies with a recipe tag, not live links.
