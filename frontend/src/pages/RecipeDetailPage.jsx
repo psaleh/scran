@@ -587,9 +587,9 @@ export default function RecipeDetailPage({ currentUser }) {
   if (isDesktop) {
     return (
       <div style={{ flex: 1, overflowY: 'auto', padding: 'var(--spacing-6)' }}>
-        <div style={{ maxWidth: 1200, margin: '0 auto', display: 'grid', gridTemplateColumns: '420px 1fr', gap: 'var(--spacing-8)', alignItems: 'start' }}>
-          <div style={{ position: 'sticky', top: 0, display: 'flex', flexDirection: 'column', maxHeight: 'calc(100dvh - 140px)', overflowY: 'auto' }}>{leftColumn}</div>
-          <div style={{ maxWidth: 640 }}>{rightColumn}</div>
+        <div style={{ maxWidth: 1200, margin: '0 auto', display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: 'var(--spacing-8)', alignItems: 'start' }}>
+          <div style={{ position: 'sticky', top: 0, display: 'flex', flexDirection: 'column', maxHeight: 'calc(100dvh - 140px)', overflowY: 'auto', paddingRight: 'var(--spacing-4)' }}>{leftColumn}</div>
+          <div>{rightColumn}</div>
         </div>
         {exportDialog}
       </div>

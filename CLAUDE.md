@@ -35,7 +35,11 @@ video-capable model like Gemini via OpenRouter, so it's separate from the
 everyday active profile; `activate` refuses video profiles and the Settings
 profile dialog has a purpose checkbox). The job creates the draft itself via
 `_create_draft_recipe()` (shared with photo_import; sets `source_url` to
-the video link, provenance note "Imported by AI from YouTube video").
+the video link, provenance note "Imported by AI from YouTube video"), then
+best-effort grabs the video's thumbnail from img.youtube.com
+(maxresdefault → hqdefault fallback; `youtube_video_id()` in `importer.py`,
+`_apply_video_thumbnail` in `worker.py`) as the draft's cover photo —
+failures are swallowed, never fail the job.
 `_poll_once` probes/runs video jobs separately from the general queue so
 they still run when the owner's local-model PC is off. Frontend:
 `ImportVideoDialog.jsx` (Browse → "Import from YouTube…"); inbox review

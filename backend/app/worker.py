@@ -711,6 +711,34 @@ JSON object matching the requested schema.
 {existing_tags}"""
 
 
+def _apply_video_thumbnail(conn, recipe_id, url):
+    """Best-effort cover photo for a video-imported draft: YouTube serves
+    every video's thumbnail at a predictable img.youtube.com URL, so grab it
+    and store it exactly like a picked photo candidate. Any failure is
+    swallowed — a missing thumbnail must never fail the import job."""
+    # Deferred imports: both modules import this one for wake().
+    from . import importer
+    from .recipes import _save_photo_bytes
+
+    video_id = importer.youtube_video_id(url)
+    if not video_id:
+        return
+    # maxresdefault is the full-size art but only exists for some videos
+    # (404 otherwise); hqdefault (480x360) exists for effectively all.
+    for name in ("maxresdefault", "hqdefault"):
+        try:
+            data, ext = importer.fetch_image(
+                f"https://img.youtube.com/vi/{video_id}/{name}.jpg"
+            )
+        except Exception:
+            continue
+        _save_photo_bytes(conn, recipe_id, data, ext, old_photo_path=None)
+        conn.commit()
+        log.info("Applied YouTube thumbnail (%s) to recipe %d", name, recipe_id)
+        return
+    log.info("No YouTube thumbnail available for recipe %d", recipe_id)
+
+
 @handles("video_import")
 def _video_import_job(conn, profile, payload):
     """AI YouTube import: send the video URL to the model and create a
@@ -744,6 +772,7 @@ def _video_import_job(conn, profile, payload):
         note="Imported by AI from YouTube video",
         source_url=url,
     )
+    _apply_video_thumbnail(conn, recipe_id, url)
     log.info(
         "Video import job created draft recipe %d (%d ingredients, %d steps)",
         recipe_id, len(recipe["ingredients"]), len(recipe["steps"]),

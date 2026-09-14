@@ -604,6 +604,20 @@ _YOUTUBE_URL_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Pulls the 11-char video id out of any accepted URL shape, for building the
+# img.youtube.com thumbnail URL. Stricter than the validator above about the
+# v= param: it must be a whole query parameter, not a suffix of another one.
+_YOUTUBE_ID_RE = re.compile(
+    r"(?:youtube\.com/(?:watch\?(?:[^#\s]*&)?v=|shorts/)|youtu\.be/)([\w-]{5,})",
+    re.IGNORECASE,
+)
+
+
+def youtube_video_id(url: str) -> str | None:
+    """The video id from a YouTube link, or None if it can't be found."""
+    match = _YOUTUBE_ID_RE.search(url)
+    return match.group(1) if match else None
+
 
 @router.post("/import/video", status_code=201)
 def import_from_video(
