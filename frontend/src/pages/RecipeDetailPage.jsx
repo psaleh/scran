@@ -30,10 +30,10 @@ function IngredientRow({ ingredient, scale, onAdd, added }) {
   const meta = [formatAmount(amount), ingredient.unit].filter(Boolean).join(' ')
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--spacing-3)', padding: 'var(--spacing-3) var(--spacing-4)' }}>
-      <div style={{ fontSize: 'var(--font-size-xl)', color: 'var(--color-text-secondary)', minWidth: 64, flexShrink: 0 }}>
+      <div style={{ fontSize: 'var(--font-size-lg)', color: 'var(--color-text-secondary)', minWidth: 64, flexShrink: 0 }}>
         {meta || '—'}
       </div>
-      <div style={{ flex: 1, minWidth: 0, fontSize: 'var(--font-size-xl)', color: 'var(--color-text-primary)' }}>
+      <div style={{ flex: 1, minWidth: 0, fontSize: 'var(--font-size-lg)', color: 'var(--color-text-primary)' }}>
         {ingredient.name}
         {/* Full line is rendered from the parts (spec §3.2): "onion — small, finely diced" */}
         {ingredient.note && (

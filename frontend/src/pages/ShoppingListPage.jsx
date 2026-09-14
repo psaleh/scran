@@ -104,14 +104,14 @@ function ItemRow({ item, onToggle, onRemove, onRecategorise, canDrag, onDragStar
         }}
       >
         {meta && (
-          <div style={{ fontSize: 'var(--font-size-xl)', color: 'var(--color-text-secondary)', flexShrink: 0, minWidth: 48 }}>
+          <div style={{ fontSize: 'var(--font-size-md)', color: 'var(--color-text-secondary)', flexShrink: 0, minWidth: 48 }}>
             {meta}
           </div>
         )}
         <div style={{ flex: 1, minWidth: 0 }}>
           <div
             style={{
-              fontSize: 'var(--font-size-xl)',
+              fontSize: 'var(--font-size-md)',
               fontWeight: 'var(--font-weight-medium)',
               color: item.checked ? 'var(--color-text-disabled)' : 'var(--color-text-primary)',
               textDecoration: item.checked ? 'line-through' : 'none',
