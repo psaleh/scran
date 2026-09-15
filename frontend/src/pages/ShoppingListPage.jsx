@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Badge } from '@astryxdesign/core/Badge'
 import { Banner } from '@astryxdesign/core/Banner'
 import { Button } from '@astryxdesign/core/Button'
@@ -24,12 +24,11 @@ const SWIPE_THRESHOLD = 140
 /**
  * One list row. Interactions (from the design mockup):
  * - swipe right = toggle checked, swipe left = remove
- * - plain tap does nothing, so an accidental brush doesn't check an item
- * - with multiple lists, a grip handle starts an HTML5 drag towards a list
- *   tab (the handle is separate from the row so the pointer-swipe gesture
- *   is untouched; touch users move items via the ⊞ dialog instead)
+ * - plain tap expands a detail row underneath showing quantity + recipe tag
+ *   (tap again, or tap a different row, to collapse it — only one row is
+ *   expanded at a time, tracked by the parent)
  */
-function ItemRow({ item, onToggle, onRemove, onRecategorise, canDrag, onDragStartItem, onDragEndItem, isDragSource }) {
+function ItemRow({ item, onToggle, onRemove, onRecategorise, isExpanded, onToggleExpand }) {
   const [dx, setDx] = useState(0)
   const dragRef = useRef(null)
 
@@ -49,12 +48,15 @@ function ItemRow({ item, onToggle, onRemove, onRecategorise, canDrag, onDragStar
   }
   const endDrag = () => {
     if (!dragRef.current) return
+    const wasTap = !dragRef.current.moved
     dragRef.current.active = false
     if (dx > SWIPE_THRESHOLD) {
       onToggle(item)
     } else if (dx < -SWIPE_THRESHOLD) {
       onRemove(item)
       return
+    } else if (wasTap) {
+      onToggleExpand(item.id)
     }
     setDx(0)
   }
@@ -100,14 +102,8 @@ function ItemRow({ item, onToggle, onRemove, onRecategorise, canDrag, onDragStar
           userSelect: 'none',
           transform: `translateX(${dx}px)`,
           transition: dragRef.current?.active ? 'none' : 'transform 200ms cubic-bezier(0.24,1,0.4,1)',
-          opacity: isDragSource ? 0.4 : 1,
         }}
       >
-        {meta && (
-          <div style={{ fontSize: 'var(--font-size-md)', color: 'var(--color-text-secondary)', flexShrink: 0, minWidth: 48 }}>
-            {meta}
-          </div>
-        )}
         <div style={{ flex: 1, minWidth: 0 }}>
           <div
             style={{
@@ -122,39 +118,29 @@ function ItemRow({ item, onToggle, onRemove, onRecategorise, canDrag, onDragStar
           >
             {item.name}
           </div>
-          {item.recipe_title && (
-            <div style={{ marginTop: 2 }}>
-              <TagBadge tag={item.recipe_title} />
+          {/* Quantity + recipe tag are hidden until the row is tapped, so the
+              name gets full width and the list reads cleaner while shopping.
+              Grid-rows trick animates a variable-height reveal without
+              measuring content. */}
+          {(meta || item.recipe_title) && (
+            <div
+              style={{
+                maxHeight: isExpanded ? 40 : 0,
+                overflow: 'hidden',
+                transition: 'max-height 180ms ease',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--spacing-2)', paddingTop: 2 }}>
+                {meta && (
+                  <span style={{ fontSize: 'var(--font-size-sm)', color: 'var(--color-text-secondary)', flexShrink: 0 }}>
+                    {meta}
+                  </span>
+                )}
+                {item.recipe_title && <TagBadge tag={item.recipe_title} />}
+              </div>
             </div>
           )}
         </div>
-        {/* Drag handle towards a list tab (only shown with multiple lists).
-            Same stop-propagation trick as the actions button so grabbing the
-            grip never starts a swipe. */}
-        {canDrag && (
-          <div
-            onPointerDown={(e) => e.stopPropagation()}
-            onPointerUp={(e) => e.stopPropagation()}
-            draggable
-            onDragStart={(e) => {
-              e.dataTransfer.effectAllowed = 'move'
-              e.dataTransfer.setData('text/plain', String(item.id))
-              onDragStartItem(item)
-            }}
-            onDragEnd={() => onDragEndItem()}
-            aria-hidden="true"
-            style={{
-              flexShrink: 0,
-              cursor: 'grab',
-              color: 'var(--color-text-secondary)',
-              padding: '0 var(--spacing-1)',
-              fontSize: 'var(--font-size-lg)',
-              touchAction: 'none',
-            }}
-          >
-            ⠿
-          </div>
-        )}
         {/* Item actions (recategorise, spec §3.6.4, plus mark done/remove and
             move-to-list — the only non-swipe/non-drag path for those). Stop
             pointer events so the tap doesn't also toggle the item or start a
@@ -177,7 +163,7 @@ function ItemRow({ item, onToggle, onRemove, onRecategorise, canDrag, onDragStar
   )
 }
 
-function CategorySection({ label, items, onToggle, onRemove, onRecategorise, dragProps }) {
+function CategorySection({ label, items, onToggle, onRemove, onRecategorise, expandedItemId, onToggleExpand }) {
   return (
     <div>
       <div style={{ ...sectionLabelStyle, padding: 'var(--spacing-3) var(--spacing-4) var(--spacing-1)' }}>
@@ -192,10 +178,8 @@ function CategorySection({ label, items, onToggle, onRemove, onRecategorise, dra
               onToggle={onToggle}
               onRemove={onRemove}
               onRecategorise={onRecategorise}
-              canDrag={dragProps.canDrag}
-              onDragStartItem={dragProps.onDragStartItem}
-              onDragEndItem={dragProps.onDragEndItem}
-              isDragSource={dragProps.draggingItem?.id === item.id}
+              isExpanded={expandedItemId === item.id}
+              onToggleExpand={onToggleExpand}
             />
           </div>
         ))}
@@ -217,10 +201,46 @@ export default function ShoppingListPage() {
   const [storeId, setStoreId] = useState(() => localStorage.getItem('scran.store') || '')
   const [lists, setLists] = useState([])
   const [activeListId, setActiveListId] = useState(null)
-  // Item currently being dragged towards a tab / the tab hovered over.
-  const [draggingItem, setDraggingItem] = useState(null)
-  const [dragOverList, setDragOverList] = useState(null)
   const toast = useToast()
+
+  // Id of the one row currently showing its quantity/recipe-tag detail
+  // (null = none expanded). Tapping a row toggles this; tapping a different
+  // row swaps which one is expanded rather than allowing several at once.
+  const [expandedItemId, setExpandedItemId] = useState(null)
+  const toggleExpanded = (id) => setExpandedItemId((prev) => (prev === id ? null : id))
+
+  const headerObserverRef = useRef(null)
+  const footerObserverRef = useRef(null)
+  const [headerHeight, setHeaderHeight] = useState(0)
+  const [footerHeight, setFooterHeight] = useState(0)
+
+  // Callback refs (not a plain ref + effect) so we measure correctly even
+  // though the footer node conditionally mounts/unmounts as the list goes
+  // from empty to non-empty — React calls this the moment the real DOM node
+  // appears or disappears, with no dependency array needed.
+  const headerRef = useCallback((node) => {
+    headerObserverRef.current?.disconnect()
+    if (node && typeof ResizeObserver !== 'undefined') {
+      const observer = new ResizeObserver(([entry]) => setHeaderHeight(entry.contentRect.height))
+      observer.observe(node)
+      headerObserverRef.current = observer
+    }
+  }, [])
+  const footerRef = useCallback((node) => {
+    footerObserverRef.current?.disconnect()
+    if (node && typeof ResizeObserver !== 'undefined') {
+      const observer = new ResizeObserver(([entry]) => setFooterHeight(entry.contentRect.height))
+      observer.observe(node)
+      footerObserverRef.current = observer
+    }
+  }, [])
+
+  const [chromeHidden, setChromeHidden] = useState(false)
+  const handleListScroll = (e) => {
+    const y = e.currentTarget.scrollTop
+    if (y > 20 && !chromeHidden) setChromeHidden(true)
+    else if (y <= 4 && chromeHidden) setChromeHidden(false)
+  }
 
   // Clear-all/Clear-completed confirmation: null = closed, else which kind.
   const [clearConfirm, setClearConfirm] = useState(null)
@@ -323,6 +343,7 @@ export default function ShoppingListPage() {
   })
 
   const toggleItem = async (item) => {
+    setExpandedItemId((id) => (id === item.id ? null : id))
     // Optimistic: flip locally, then persist; roll back on failure.
     setItems((list) => list.map((i) => (i.id === item.id ? { ...i, checked: !i.checked } : i)))
     try {
@@ -363,6 +384,7 @@ export default function ShoppingListPage() {
   }
 
   const removeItem = async (item) => {
+    setExpandedItemId((id) => (id === item.id ? null : id))
     const previous = items
     setItems((list) => list.filter((i) => i.id !== item.id))
     try {
@@ -464,22 +486,36 @@ export default function ShoppingListPage() {
 
   const checkedCount = completed.length
 
-  // Shared drag wiring for every CategorySection/ItemRow.
-  const dragProps = {
-    canDrag: showTabs,
-    draggingItem,
-    onDragStartItem: setDraggingItem,
-    onDragEndItem: () => { setDraggingItem(null); setDragOverList(null) },
-  }
-
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, width: '100%', maxWidth: 600, margin: '0 auto' }}>
-        {/* Header: title, store selector, add bar */}
-        <div style={{ background: 'var(--color-background-surface)', borderBottom: '1px solid var(--color-border)', flexShrink: 0 }}>
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, width: '100%', maxWidth: 600, margin: '0 auto', position: 'relative', overflow: 'hidden' }}>
+        {/* Header: title, store selector, add bar. Overlaid on top of the
+            list and slid off-screen via transform when scrolled down, rather
+            than collapsing its own layout height — collapsing height would
+            resize the scrollable list itself, which on a short list can
+            eliminate all overflow and snap scrollTop to 0. That looks
+            identical to "user scrolled back to the top" and immediately
+            brings the header back — hiding the add-item bar behind an
+            unbreakable bounce loop. Overlaying keeps the list's scrollable
+            height constant regardless of chromeHidden, so that can't happen,
+            and scrolling to the top always successfully brings it back. */}
+        <div
+          ref={headerRef}
+          style={{
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            right: 0,
+            zIndex: 2,
+            background: 'var(--color-background-surface)',
+            borderBottom: '1px solid var(--color-border)',
+            transform: chromeHidden ? 'translateY(-100%)' : 'translateY(0)',
+            transition: 'transform 200ms ease',
+          }}
+        >
           <div style={{ padding: 'var(--spacing-4)', paddingBottom: 'var(--spacing-3)', display: 'flex', flexDirection: 'column', gap: 'var(--spacing-3)' }}>
-            {/* List tabs (hidden with a single list). Each tab is also a drop
-                target: dragging an item's ⠿ handle onto a tab moves it there. */}
+            {/* List tabs (hidden with a single list). Items move between
+                lists via the ⊞ dialog's "Move to list" section. */}
             {showTabs && (
               <div className="hide-scrollbar" style={{ overflowX: 'auto' }}>
                 <TabList value={String(activeListId)} onChange={(v) => selectList(Number(v))}>
@@ -488,15 +524,6 @@ export default function ShoppingListPage() {
                       key={l.id}
                       value={String(l.id)}
                       label={uncheckedCountFor(l.id) > 0 ? `${l.name} (${uncheckedCountFor(l.id)})` : l.name}
-                      onDragEnter={(e) => { if (draggingItem) { e.preventDefault(); setDragOverList(l.id) } }}
-                      onDragOver={(e) => { if (draggingItem) e.preventDefault() }}
-                      onDragLeave={() => { if (dragOverList === l.id) setDragOverList(null) }}
-                      onDrop={(e) => {
-                        e.preventDefault()
-                        if (draggingItem) moveItem(draggingItem, l.id)
-                        setDragOverList(null)
-                      }}
-                      style={dragOverList === l.id ? { outline: '2px solid var(--color-accent)', borderRadius: 'var(--radius-sm)' } : undefined}
                     />
                   ))}
                 </TabList>
@@ -554,8 +581,19 @@ export default function ShoppingListPage() {
           </div>
         </div>
 
-        {/* List */}
-        <div style={{ flex: 1, overflowY: 'auto', paddingBottom: 'var(--spacing-6)' }}>
+        {/* List. Padding-top/bottom reserve exactly the header/footer's
+            measured height so content isn't hidden underneath them when
+            they're shown — padding that never changes, which is what keeps
+            this scroll area's height constant regardless of chromeHidden. */}
+        <div
+          style={{
+            flex: 1,
+            overflowY: 'auto',
+            paddingTop: headerHeight,
+            paddingBottom: `calc(${footerHeight}px + var(--spacing-6))`,
+          }}
+          onScroll={handleListScroll}
+        >
           {listError ? (
             <div style={{ padding: 'var(--spacing-4)' }}>
               <Banner status="error" title="Couldn't load your shopping list" description={listError} />
@@ -570,13 +608,13 @@ export default function ShoppingListPage() {
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-4)', paddingTop: 'var(--spacing-1)' }}>
               {orderedSections.map((id) => (
-                <CategorySection key={id} label={categoryName[id]} items={byCategory.get(id)} onToggle={toggleItem} onRemove={removeItem} onRecategorise={setRecatItem} dragProps={dragProps} />
+                <CategorySection key={id} label={categoryName[id]} items={byCategory.get(id)} onToggle={toggleItem} onRemove={removeItem} onRecategorise={setRecatItem} expandedItemId={expandedItemId} onToggleExpand={toggleExpanded} />
               ))}
               {uncategorised.length > 0 && (
-                <CategorySection label="Uncategorised" items={uncategorised} onToggle={toggleItem} onRemove={removeItem} onRecategorise={setRecatItem} dragProps={dragProps} />
+                <CategorySection label="Uncategorised" items={uncategorised} onToggle={toggleItem} onRemove={removeItem} onRecategorise={setRecatItem} expandedItemId={expandedItemId} onToggleExpand={toggleExpanded} />
               )}
               {completed.length > 0 && (
-                <CategorySection label="Completed" items={[...completed].sort(byName)} onToggle={toggleItem} onRemove={removeItem} onRecategorise={setRecatItem} dragProps={dragProps} />
+                <CategorySection label="Completed" items={[...completed].sort(byName)} onToggle={toggleItem} onRemove={removeItem} onRecategorise={setRecatItem} expandedItemId={expandedItemId} onToggleExpand={toggleExpanded} />
               )}
             </div>
           )}
@@ -642,9 +680,26 @@ export default function ShoppingListPage() {
           )}
         </Dialog>
 
-        {/* Footer actions (scoped to the active list) */}
+        {/* Footer actions (scoped to the active list). Overlaid and slid
+            off-screen with the header, for the same reason (see above). */}
         {visible.length > 0 && (
-          <div style={{ display: 'flex', gap: 'var(--spacing-2)', padding: 'var(--spacing-3) var(--spacing-4)', background: 'var(--color-background-surface)', borderTop: '1px solid var(--color-border)', flexShrink: 0 }}>
+          <div
+            ref={footerRef}
+            style={{
+              position: 'absolute',
+              bottom: 0,
+              left: 0,
+              right: 0,
+              zIndex: 2,
+              display: 'flex',
+              gap: 'var(--spacing-2)',
+              padding: 'var(--spacing-3) var(--spacing-4)',
+              background: 'var(--color-background-surface)',
+              borderTop: '1px solid var(--color-border)',
+              transform: chromeHidden ? 'translateY(100%)' : 'translateY(0)',
+              transition: 'transform 200ms ease',
+            }}
+          >
             <div style={{ flex: 1 }}>
               <Button
                 label={`Clear completed${checkedCount ? ` (${checkedCount})` : ''}`}
