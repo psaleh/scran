@@ -17,7 +17,7 @@
 // Bump SHELL_CACHE's version when changing this file's precache list; old
 // caches are deleted on activate.
 
-const SHELL_CACHE = 'scran-shell-v1'
+const SHELL_CACHE = 'scran-shell-v2'
 const API_CACHE = 'scran-api-v1'
 
 // Files the app needs to boot offline. Hashed JS/CSS under /assets is cached
@@ -71,7 +71,10 @@ self.addEventListener('fetch', (event) => {
   if (request.method !== 'GET' || url.origin !== self.location.origin) return
 
   if (request.mode === 'navigate') {
-    event.respondWith(networkFirst(request, SHELL_CACHE, '/index.html'))
+    // cache: 'no-cache' makes the browser check with the server instead of
+    // reusing an HTTP-cached index.html, which could point at an old build's
+    // JS (seen on Android: the installed app kept showing a stale UI).
+    event.respondWith(networkFirst(new Request(request, { cache: 'no-cache' }), SHELL_CACHE, '/index.html'))
   } else if (url.pathname.startsWith('/assets/')) {
     event.respondWith(cacheFirst(request))
   } else if (OFFLINE_API.has(url.pathname)) {

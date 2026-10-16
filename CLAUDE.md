@@ -113,7 +113,12 @@ temporary test-job button/endpoint — see "AI integration" below).
   offline Banner and refetches on `online`. Logout posts
   `clear-api-cache` to the worker. `main.py` serves `index.html`/`sw.js`
   with `Cache-Control: no-cache` and registers the `.webmanifest` MIME
-  type. Bump `SHELL_CACHE` when changing the precache list.
+  type. Bump `SHELL_CACHE` when changing the precache list. Updates:
+  navigations fetch with `cache: 'no-cache'` (an installed Android PWA
+  once kept serving a stale HTTP-cached index.html), `main.jsx` calls
+  `registration.update()` whenever the app returns to the foreground, and
+  reloads once on `controllerchange` (skipped on first install) so a new
+  deploy takes effect without the user force-closing the app.
 - **Editable shopping items**: the ⊞ row dialog opens with an
   `ItemEditForm` (name/amount/unit/category `Selector`/note — the category
   dropdown replaced the old list of category buttons, which overflowed the

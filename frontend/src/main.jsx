@@ -41,9 +41,30 @@ createRoot(document.getElementById('root')).render(
 // the shopping list stays readable offline. Production builds only — in Vite
 // dev a caching worker would just serve stale modules and confuse things.
 if ('serviceWorker' in navigator && import.meta.env.PROD) {
+  // Was this page already controlled by a worker when it loaded? If so, a
+  // later controller change means a new deploy's worker has taken over.
+  const hadController = Boolean(navigator.serviceWorker.controller)
+
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/sw.js').catch((err) => {
-      console.warn('Service worker registration failed', err)
-    })
+    navigator.serviceWorker
+      .register('/sw.js')
+      .then((registration) => {
+        // An installed app can sit in the background for days without ever
+        // navigating, so the browser never re-checks sw.js on its own. Check
+        // each time the app comes back to the foreground.
+        document.addEventListener('visibilitychange', () => {
+          if (document.visibilityState === 'visible') registration.update().catch(() => {})
+        })
+      })
+      .catch((err) => {
+        console.warn('Service worker registration failed', err)
+      })
+  })
+
+  // A new worker (i.e. a new deploy) took over: reload once so the page runs
+  // the new build instead of the JS it started with. Skipped on the very
+  // first install, where there's no old build to replace.
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (hadController) window.location.reload()
   })
 }
