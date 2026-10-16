@@ -738,9 +738,22 @@ export default function ShoppingListPage() {
         {/* Per-row actions dialog: the same "change category" tap target also
             gives Mark done/Remove a keyboard/assistive path, since the list
             row itself is swipe-only (spec: plain tap does nothing there). */}
-        <Dialog isOpen={recatItem !== null} onOpenChange={(open) => { if (!open) setRecatItem(null) }} purpose="form">
+        {/* Taller cap than the 75vh default so the whole form fits on most
+            phones. On screens where it still doesn't, the content box below
+            scrolls — it has to be that box, because Astryx's inner wrapper
+            clips with overflow: hidden. */}
+        <Dialog
+          isOpen={recatItem !== null}
+          onOpenChange={(open) => { if (!open) setRecatItem(null) }}
+          purpose="form"
+          maxHeight="90dvh"
+        >
           {recatItem && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-3)', padding: 'var(--spacing-2)' }}>
+            // Chrome makes scrollable boxes focusable, and showModal() focuses
+            // the first focusable thing — this box — drawing a ring around
+            // the whole form. tabIndex -1 keeps it out of the Tab order and
+            // outline: none hides that ring; Tab still goes to the fields.
+            <div tabIndex={-1} style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-3)', padding: 'var(--spacing-2)', minHeight: 0, overflowY: 'auto', outline: 'none' }}>
               <h2 style={{ margin: 0, fontSize: 'var(--text-heading-2-size)', fontWeight: 'var(--text-heading-2-weight)', color: 'var(--color-text-primary)' }}>
                 “{recatItem.name}”
               </h2>
@@ -763,22 +776,24 @@ export default function ShoppingListPage() {
                 </div>
               </div>
               {/* Touch/assistive path for moving between lists (drag-to-tab
-                  needs a mouse). Only shown when there is somewhere to move to. */}
+                  needs a mouse). Only shown when there is somewhere to move to.
+                  A dropdown rather than one button per list, so the dialog
+                  doesn't grow taller with every list added. Picking a list
+                  moves the item straight away. */}
               {showTabs && (
-                <>
-                  <Divider />
-                  <span style={{ fontSize: 'var(--text-supporting-size)', color: 'var(--color-text-secondary)' }}>Move to list</span>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-1)' }}>
-                    {lists.filter((l) => l.id !== recatItem.list_id).map((l) => (
-                      <Button
-                        key={l.id}
-                        label={l.name}
-                        variant="ghost"
-                        clickAction={() => { moveItem(recatItem, l.id); setRecatItem(null) }}
-                      />
-                    ))}
-                  </div>
-                </>
+                <Selector
+                  label="Move to list"
+                  placeholder="Choose a list…"
+                  options={lists
+                    .filter((l) => l.id !== recatItem.list_id)
+                    .map((l) => ({ value: String(l.id), label: l.name }))}
+                  value={undefined}
+                  onChange={(value) => {
+                    if (!value) return
+                    moveItem(recatItem, Number(value))
+                    setRecatItem(null)
+                  }}
+                />
               )}
               <Button label="Cancel" variant="ghost" onClick={() => setRecatItem(null)} />
             </div>

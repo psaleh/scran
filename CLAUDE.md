@@ -128,6 +128,12 @@ temporary test-job button/endpoint — see "AI integration" below).
   `set_details: true` writes those fields exactly as sent (blank → NULL,
   blank name → 400); without the flag the old fill-only COALESCE
   behaviour remains. The expanded row shows the note after the quantity.
+  "Move to list" in the same dialog is a `Selector` too (moves on pick).
+  The dialog uses `maxHeight="90dvh"` and its content box scrolls
+  (`minHeight: 0` + `overflowY: auto`) — Astryx's inner Dialog wrapper has
+  `overflow: hidden`, so scrolling the `<dialog>` itself doesn't work; the
+  box also needs `tabIndex={-1}` + `outline: none` or `showModal()` focuses
+  it and rings the whole form.
 
 ## UI pass (2026-07-17, commit 6447408) + migration squash
 
