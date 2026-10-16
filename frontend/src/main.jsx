@@ -36,3 +36,14 @@ createRoot(document.getElementById('root')).render(
     <Root />
   </StrictMode>,
 )
+
+// Register the service worker (public/sw.js) so the app is installable and
+// the shopping list stays readable offline. Production builds only — in Vite
+// dev a caching worker would just serve stale modules and confuse things.
+if ('serviceWorker' in navigator && import.meta.env.PROD) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').catch((err) => {
+      console.warn('Service worker registration failed', err)
+    })
+  })
+}

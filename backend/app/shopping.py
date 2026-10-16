@@ -52,6 +52,11 @@ class ItemPatch(BaseModel):
     # Distinguish "recategorise to X" from "field not sent": the client sets
     # this flag when category_id is intentionally part of the patch.
     set_category: bool = False
+    note: str | None = None
+    # Full edit from the row dialog: when set, name/amount/unit/note are
+    # written exactly as sent, so a blank amount/unit/note clears it (the
+    # plain fields above only ever fill values in — see patch_item).
+    set_details: bool = False
     # Move the item to another list. No set_* flag needed — moving to NULL is
     # never meaningful, unlike category_id.
     list_id: int | None = None
@@ -197,7 +202,9 @@ def patch_item(
             " VALUES (?, ?, 1)"
             " ON CONFLICT(ingredient_name)"
             " DO UPDATE SET category_id = excluded.category_id",
-            (item["name"].strip().lower(), body.category_id),
+            # A rename in the same edit should teach the lookup the new name.
+            ((body.name if body.set_details and body.name else item["name"]).strip().lower(),
+             body.category_id),
         )
         db.execute(
             "UPDATE shopping_items SET category_id = ? WHERE id = ?",
@@ -208,12 +215,27 @@ def patch_item(
             "UPDATE shopping_items SET checked = ? WHERE id = ?",
             (int(body.checked), item_id),
         )
-    if body.name is not None and body.name.strip():
+    if body.set_details:
+        name = (body.name or "").strip()
+        if not name:
+            raise HTTPException(status_code=400, detail="Name is required")
+        db.execute(
+            "UPDATE shopping_items SET name = ?, amount = ?, unit = ?, note = ?"
+            " WHERE id = ?",
+            (
+                name,
+                body.amount,
+                (body.unit or "").strip() or None,
+                (body.note or "").strip() or None,
+                item_id,
+            ),
+        )
+    elif body.name is not None and body.name.strip():
         db.execute(
             "UPDATE shopping_items SET name = ? WHERE id = ?",
             (body.name.strip(), item_id),
         )
-    if body.amount is not None or body.unit is not None:
+    if not body.set_details and (body.amount is not None or body.unit is not None):
         db.execute(
             "UPDATE shopping_items SET amount = COALESCE(?, amount),"
             " unit = COALESCE(?, unit) WHERE id = ?",

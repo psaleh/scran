@@ -45,8 +45,7 @@ they still run when the owner's local-model PC is off. Frontend:
 `ImportVideoDialog.jsx` (Browse → "Import from YouTube…"); inbox review
 opens the draft recipe directly (no photos column).
 **Remaining**: AI slice stage 5 (name/note cleanup job + removing the
-temporary test-job button/endpoint — see "AI integration" below), PWA
-service worker.
+temporary test-job button/endpoint — see "AI integration" below).
 
 ## Recent additions (2026-07-14, not yet folded into narrative above)
 
@@ -97,6 +96,33 @@ service worker.
   scoped to the active tab; undo restores to the item's original list.
   Lists are managed in Settings → Shopping lists (`ShoppingListsSection`,
   clone of CategoriesSection; default shows a Badge, no delete button).
+
+## PWA + item editing (2026-10-16)
+
+- **Installable PWA**: icon pack in `frontend/public/` (`favicon.svg` adapts
+  to dark mode, `favicon.ico`, `icons/` 180/192/512/maskable-512), filled-in
+  `manifest.webmanifest` (matcha cream `#F0F0E0`, Shopping/Recipes
+  shortcuts). Chrome only offers install over **HTTPS** (or localhost) —
+  needs the reverse proxy in production.
+- **Service worker** `frontend/public/sw.js` (hand-written, no Workbox),
+  registered in `main.jsx` for production builds only. Navigations
+  network-first → cached `index.html`; `/assets/*` cache-first; an
+  allowlist of API GETs (`OFFLINE_API`: auth/me, shopping, shopping-lists,
+  categories, stores) network-first → last good copy; all other requests
+  are never cached. Offline is read-only; `ShoppingListPage.jsx` shows an
+  offline Banner and refetches on `online`. Logout posts
+  `clear-api-cache` to the worker. `main.py` serves `index.html`/`sw.js`
+  with `Cache-Control: no-cache` and registers the `.webmanifest` MIME
+  type. Bump `SHELL_CACHE` when changing the precache list.
+- **Editable shopping items**: the ⊞ row dialog opens with an
+  `ItemEditForm` (name/amount/unit/category `Selector`/note — the category
+  dropdown replaced the old list of category buttons, which overflowed the
+  dialog; a changed category rides the same PATCH with `set_category`, and
+  the lookup row is written under the new name if renamed in the same
+  save). `PATCH /api/shopping/{id}` with
+  `set_details: true` writes those fields exactly as sent (blank → NULL,
+  blank name → 400); without the flag the old fill-only COALESCE
+  behaviour remains. The expanded row shows the note after the quantity.
 
 ## UI pass (2026-07-17, commit 6447408) + migration squash
 

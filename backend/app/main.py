@@ -7,6 +7,7 @@ frontend. Run in development with:
 """
 
 import logging
+import mimetypes
 import os
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -91,9 +92,19 @@ _dist = Path(config.FRONTEND_DIST)
 if _dist.is_dir():
     app.mount("/assets", StaticFiles(directory=_dist / "assets"), name="assets")
 
+    # Python's mimetypes table doesn't know the PWA manifest extension; Chrome
+    # wants the proper type before it will treat the app as installable.
+    mimetypes.add_type("application/manifest+json", ".webmanifest")
+
+    # index.html and the service worker must always be revalidated, or
+    # browsers keep running an old build/worker after a deploy. The hashed
+    # files under /assets are safe to cache normally.
+    _NO_CACHE = {"Cache-Control": "no-cache"}
+
     @app.get("/{full_path:path}", include_in_schema=False)
     def spa(full_path: str):
         candidate = _dist / full_path
         if full_path and candidate.is_file():
-            return FileResponse(candidate)
-        return FileResponse(_dist / "index.html")
+            headers = _NO_CACHE if full_path == "sw.js" else None
+            return FileResponse(candidate, headers=headers)
+        return FileResponse(_dist / "index.html", headers=_NO_CACHE)

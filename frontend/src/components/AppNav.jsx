@@ -16,6 +16,9 @@ function Wordmark() {
   return (
     <span
       style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 'var(--spacing-2)',
         fontSize: 'var(--text-large-size)',
         fontWeight: 'var(--font-weight-bold)',
         color: 'var(--color-text-primary)',
@@ -23,7 +26,19 @@ function Wordmark() {
         marginRight: 'var(--spacing-4)',
       }}
     >
-      scran<span style={{ color: 'var(--color-text-orange)' }}>.</span>
+      {/* The app icon (same art as the favicon/PWA icon). The PNG, not
+          favicon.svg: the SVG recolours itself for the *system* dark mode,
+          which can disagree with the in-app Appearance setting. Decorative,
+          since the wordmark beside it already names the app. */}
+      <img
+        src="/icons/icon-192.png"
+        alt=""
+        width={32}
+        height={32}
+      />
+      <span>
+        scran<span style={{ color: 'var(--color-text-orange)' }}>.</span>
+      </span>
     </span>
   )
 }

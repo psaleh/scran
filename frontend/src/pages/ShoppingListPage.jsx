@@ -61,7 +61,9 @@ function ItemRow({ item, onToggle, onRemove, onRecategorise, isExpanded, onToggl
     setDx(0)
   }
 
-  const meta = [formatAmount(item.amount), item.unit].filter(Boolean).join(' ')
+  const meta = [[formatAmount(item.amount), item.unit].filter(Boolean).join(' '), item.note]
+    .filter(Boolean)
+    .join(' — ')
   const revealRight = dx > 0
   const revealAmount = Math.min(Math.abs(dx), SWIPE_THRESHOLD)
 
@@ -132,7 +134,7 @@ function ItemRow({ item, onToggle, onRemove, onRecategorise, isExpanded, onToggl
             >
               <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--spacing-2)', paddingTop: 2 }}>
                 {meta && (
-                  <span style={{ fontSize: 'var(--font-size-sm)', color: 'var(--color-text-secondary)', flexShrink: 0 }}>
+                  <span style={{ fontSize: 'var(--font-size-sm)', color: 'var(--color-text-secondary)', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {meta}
                   </span>
                 )}
@@ -160,6 +162,78 @@ function ItemRow({ item, onToggle, onRemove, onRecategorise, isExpanded, onToggl
         </div>
       </div>
     </div>
+  )
+}
+
+/**
+ * Edit form at the top of the per-row dialog. Holds its own draft of the
+ * fields, seeded from the item; the parent renders it with key={item.id} so
+ * opening a different item starts a fresh draft. Editing a list item never
+ * touches the recipe it came from (items are copies).
+ */
+function ItemEditForm({ item, categories, onSave }) {
+  const [name, setName] = useState(item.name)
+  const [amount, setAmount] = useState(item.amount == null ? '' : String(item.amount))
+  const [unit, setUnit] = useState(item.unit ?? '')
+  const [note, setNote] = useState(item.note ?? '')
+  // Selector values are strings; '' = uncategorised. No clear button: like
+  // the editor, a category can be changed but not removed.
+  const [categoryId, setCategoryId] = useState(item.category_id == null ? '' : String(item.category_id))
+  const categoryNumber = categoryId === '' ? null : Number(categoryId)
+
+  const amountNumber = amount.trim() === '' ? null : Number(amount)
+  const amountInvalid = amountNumber !== null && !Number.isFinite(amountNumber)
+  const nameMissing = name.trim() === ''
+  const unchanged =
+    name.trim() === item.name &&
+    amountNumber === item.amount &&
+    unit.trim() === (item.unit ?? '') &&
+    note.trim() === (item.note ?? '') &&
+    categoryNumber === item.category_id
+
+  const save = (e) => {
+    e.preventDefault()
+    if (nameMissing || amountInvalid || unchanged) return
+    onSave(item, {
+      name: name.trim(),
+      amount: amountNumber,
+      unit: unit.trim(),
+      note: note.trim(),
+      categoryId: categoryNumber,
+    })
+  }
+
+  return (
+    <form onSubmit={save} style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-2)' }}>
+      <TextInput label="Name" value={name} onChange={setName} isRequired />
+      <div style={{ display: 'flex', gap: 'var(--spacing-2)' }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <TextInput
+            label="Amount"
+            value={amount}
+            onChange={setAmount}
+            status={amountInvalid ? { type: 'error', message: 'Must be a number' } : undefined}
+          />
+        </div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <TextInput label="Unit" value={unit} onChange={setUnit} />
+        </div>
+      </div>
+      <Selector
+        label="Category"
+        placeholder="Uncategorised"
+        options={categories.map((c) => ({ value: String(c.id), label: c.name }))}
+        value={categoryId || undefined}
+        onChange={(value) => setCategoryId(value ?? '')}
+      />
+      <TextInput label="Note" value={note} onChange={setNote} isOptional />
+      <Button
+        type="submit"
+        label="Save changes"
+        variant="primary"
+        isDisabled={nameMissing || amountInvalid || unchanged}
+      />
+    </form>
   )
 }
 
@@ -258,9 +332,17 @@ export default function ShoppingListPage() {
   // Item being recategorised via the per-row dialog (null = closed).
   const [recatItem, setRecatItem] = useState(null)
 
-  useEffect(() => {
+  // Offline state for the banner. The service worker (public/sw.js) serves
+  // the last good copy of the list GETs while offline; changes still need a
+  // connection.
+  const [isOffline, setIsOffline] = useState(() => !navigator.onLine)
+
+  const loadAll = useCallback(() => {
     api('/api/shopping')
-      .then(setItems)
+      .then((loaded) => {
+        setItems(loaded)
+        setListError(null)
+      })
       .catch((err) => {
         setListError(err.message || 'Failed to load the shopping list.')
         setItems([])
@@ -278,6 +360,25 @@ export default function ShoppingListPage() {
     api('/api/categories').then(setCategories).catch(() => {})
     api('/api/stores').then(setStores).catch(() => {})
   }, [])
+
+  useEffect(() => {
+    loadAll()
+  }, [loadAll])
+
+  // Back online → refetch so the list reflects changes made elsewhere.
+  useEffect(() => {
+    const goOnline = () => {
+      setIsOffline(false)
+      loadAll()
+    }
+    const goOffline = () => setIsOffline(true)
+    window.addEventListener('online', goOnline)
+    window.addEventListener('offline', goOffline)
+    return () => {
+      window.removeEventListener('online', goOnline)
+      window.removeEventListener('offline', goOffline)
+    }
+  }, [loadAll])
 
   // Autocomplete against the shared ingredient lookup (spec §3.2).
   useEffect(() => {
@@ -412,14 +513,21 @@ export default function ShoppingListPage() {
     }
   }
 
-  const recategorise = async (item, categoryId) => {
+  // Full edit from the row dialog. set_details tells the server to write the
+  // fields exactly as sent, so clearing the amount/unit/note sticks. A changed
+  // category is sent with set_category, which also writes it back to
+  // ingredient_lookup so it sticks for future saves (spec §3.6.4).
+  const editItem = async (item, { categoryId, ...fields }) => {
     setRecatItem(null)
+    const categoryChanged = categoryId !== item.category_id
     try {
-      // The server also writes the choice back to ingredient_lookup so it
-      // sticks for future saves (spec §3.6.4).
       const updated = await api(`/api/shopping/${item.id}`, {
         method: 'PATCH',
-        body: { set_category: true, category_id: categoryId },
+        body: {
+          set_details: true,
+          ...fields,
+          ...(categoryChanged ? { set_category: true, category_id: categoryId } : {}),
+        },
       })
       setItems((list) => list.map((i) => (i.id === item.id ? updated : i)))
     } catch (err) {
@@ -514,6 +622,13 @@ export default function ShoppingListPage() {
           }}
         >
           <div style={{ padding: 'var(--spacing-4)', paddingBottom: 'var(--spacing-3)', display: 'flex', flexDirection: 'column', gap: 'var(--spacing-3)' }}>
+            {isOffline && (
+              <Banner
+                status="warning"
+                title="You're offline"
+                description="Showing the last synced list. Changes need a connection."
+              />
+            )}
             {/* List tabs (hidden with a single list). Items move between
                 lists via the ⊞ dialog's "Move to list" section. */}
             {showTabs && (
@@ -629,6 +744,8 @@ export default function ShoppingListPage() {
               <h2 style={{ margin: 0, fontSize: 'var(--text-heading-2-size)', fontWeight: 'var(--text-heading-2-weight)', color: 'var(--color-text-primary)' }}>
                 “{recatItem.name}”
               </h2>
+              <ItemEditForm key={recatItem.id} item={recatItem} categories={categories} onSave={editItem} />
+              <Divider />
               <div style={{ display: 'flex', gap: 'var(--spacing-2)' }}>
                 <div style={{ flex: 1 }}>
                   <Button
@@ -663,18 +780,6 @@ export default function ShoppingListPage() {
                   </div>
                 </>
               )}
-              <Divider />
-              <span style={{ fontSize: 'var(--text-supporting-size)', color: 'var(--color-text-secondary)' }}>Category</span>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-1)', maxHeight: '50vh', overflowY: 'auto' }}>
-                {categories.map((c) => (
-                  <Button
-                    key={c.id}
-                    label={c.name}
-                    variant={recatItem.category_id === c.id ? 'secondary' : 'ghost'}
-                    clickAction={() => recategorise(recatItem, c.id)}
-                  />
-                ))}
-              </div>
               <Button label="Cancel" variant="ghost" onClick={() => setRecatItem(null)} />
             </div>
           )}

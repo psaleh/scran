@@ -67,7 +67,12 @@ export default function App() {
     return <LoginPage onLogin={setUser} />
   }
 
-  const logout = () => api('/api/auth/logout', { method: 'POST' }).finally(() => setUser(null))
+  const logout = () => {
+    // Tell the service worker to drop its offline copies of API data (the
+    // shopping list etc.) so they don't outlive this session on the device.
+    navigator.serviceWorker?.controller?.postMessage({ type: 'clear-api-cache' })
+    return api('/api/auth/logout', { method: 'POST' }).finally(() => setUser(null))
+  }
 
   return (
     <BrowserRouter>
